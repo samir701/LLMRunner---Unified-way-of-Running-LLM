@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-llm-runner"
+version = "0.1.0"
+description = "Run a large language model across multiple LAN machines using sequential layer pipelining."
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.2.0,<3.0.0",
+    "transformers>=4.45.0,<5.0.0",
+    "safetensors>=0.4.2,<1.0.0",
+    "typer>=0.12.0,<1.0.0",
+    "pyyaml>=6.0.1,<7.0.0",
+    "rich>=13.7.0,<14.0.0",
+    "numpy>=1.26.0,<3.0.0",
+]
+
+[project.scripts]
+llmrun = "src.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["src*"]

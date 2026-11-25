@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Local configs (contain machine-specific LAN IPs and ports)
+config/host.yaml
+config/peer.yaml
+
+# Model weights and runtime logs
+models/*
+!models/.gitkeep
+logs/*
+!logs/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db

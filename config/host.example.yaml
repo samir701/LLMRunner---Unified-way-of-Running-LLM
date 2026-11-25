@@ -1,0 +1,25 @@
+model: "models/<model-name>"
+listen_port: 5000                # Inbound peers (Kaggle / remote friends) connect here
+# auth_token: "my-secret-token"  # Recommended when accepting global/WAN peers
+# routing: "auto"                # "auto" (uses host_relay if any peer is inbound), "direct", or "host_relay"
+# peer_wait_timeout: 300         # Seconds to wait for inbound peers to connect
+
+peers:
+  # 1) Local LAN laptop (host connects to it directly)
+  - name: "local-laptop"
+    mode: "outbound"             # default; host connects to address:port
+    address: "192.168.1.21"
+    port: 5001
+
+  # 2) Kaggle / remote friend behind NAT (peer connects outbound to host's public/tunnel endpoint)
+  # - name: "kaggle-1"
+  #   mode: "inbound"
+  # - name: "kaggle-2"
+  #   mode: "inbound"
+  # - name: "friend-pc"
+  #   mode: "inbound"
+
+generation:
+  max_tokens: 512
+  temperature: 0.7
+  top_p: 0.9
