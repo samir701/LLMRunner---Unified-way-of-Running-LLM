@@ -16,7 +16,7 @@ from typing import Any
 import torch
 import torch.nn as nn
 from safetensors import safe_open
-from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer, GenerationConfig as HFGenerationConfig
 
 from src.model.shard import LayerRange
 
@@ -116,6 +116,24 @@ def get_num_layers(model_config: Any) -> int:
 def load_tokenizer(model_dir: str | Path) -> Any:
     """Load the model's tokenizer (used by the host only)."""
     return AutoTokenizer.from_pretrained(str(model_dir), local_files_only=True)
+
+
+def load_generation_eos_ids(model_dir: str | Path) -> set[int]:
+    """Read official EOS token IDs from `generation_config.json` if present."""
+    eos_ids: set[int] = set()
+    gen_path = Path(model_dir) / "generation_config.json"
+    if not gen_path.exists():
+        return eos_ids
+    try:
+        hf_gen = HFGenerationConfig.from_pretrained(str(model_dir), local_files_only=True)
+        eos = getattr(hf_gen, "eos_token_id", None)
+        if isinstance(eos, int):
+            eos_ids.add(eos)
+        elif isinstance(eos, (list, tuple, set)):
+            eos_ids.update(int(x) for x in eos)
+    except Exception:
+        pass
+    return eos_ids
 
 
 def _find_safetensors_files(model_dir: Path) -> dict[str, Path]:

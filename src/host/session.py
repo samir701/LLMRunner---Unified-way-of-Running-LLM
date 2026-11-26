@@ -14,13 +14,13 @@ from src.common.tensor_codec import decode_tensor, encode_tensor
 from src.host.coordinator import Coordinator
 from src.host.sampler import sample_next_token
 from src.model.engine import ShardEngine
-from src.model.loader import load_tokenizer
+from src.model.loader import load_generation_eos_ids, load_tokenizer
 
 logger = logging.getLogger(__name__)
 
 
 class ChatSession:
-    """Runs one prompt-response generation loop across the host + peer pipeline."""
+    """Runs one multi-turn chat session across the host + peer pipeline."""
 
     def __init__(self, coordinator: Coordinator, gen_config: GenerationConfig) -> None:
         if coordinator.host_shard is None:
@@ -29,6 +29,8 @@ class ChatSession:
         self.gen_config = gen_config
         self.engine = ShardEngine(coordinator.host_shard)
         self.tokenizer = load_tokenizer(coordinator.config.model)
+        self._model_eos_ids = load_generation_eos_ids(coordinator.config.model)
+        self.history: list[dict[str, str]] = []
 
     def _run_pipeline_step(
         self,
@@ -149,11 +151,40 @@ class ChatSession:
 
         raise RuntimeError("No peers configured in pipeline.")
 
+    def _build_messages(self, prompt: str) -> list[dict[str, str]]:
+        """Assemble recent conversation turns plus the current prompt."""
+        max_msgs = self.gen_config.history_turns * 2
+        recent = self.history[-max_msgs:] if max_msgs > 0 else []
+        return [*recent, {"role": "user", "content": prompt}]
+
     def _encode_prompt(self, prompt: str) -> torch.Tensor:
-        """Apply chat template when available (for Instruct models) and tokenize."""
+        """Apply chat template (universally supporting models with/without system role)."""
+        turns = self._build_messages(prompt)
+        sys_prompt = self.gen_config.system_prompt.strip()
+
         if getattr(self.tokenizer, "chat_template", None):
+            if sys_prompt:
+                try:
+                    formatted = self.tokenizer.apply_chat_template(
+                        [{"role": "system", "content": sys_prompt}, *turns],
+                        tokenize=False,
+                        add_generation_prompt=True,
+                    )
+                    return self.tokenizer.encode(
+                        formatted,
+                        add_special_tokens=False,
+                        return_tensors="pt",
+                    )
+                except Exception:
+                    # Fallback for templates without a system role (e.g. Gemma / older Mistral).
+                    turns = list(turns)
+                    turns[0] = {
+                        "role": "user",
+                        "content": f"{sys_prompt}\n\n{turns[0]['content']}",
+                    }
+
             formatted = self.tokenizer.apply_chat_template(
-                [{"role": "user", "content": prompt}],
+                turns,
                 tokenize=False,
                 add_generation_prompt=True,
             )
@@ -162,25 +193,33 @@ class ChatSession:
                 add_special_tokens=False,
                 return_tensors="pt",
             )
-        return self.tokenizer.encode(prompt, return_tensors="pt")
+
+        # Fallback for base models without a chat template.
+        parts = [f"System: {sys_prompt}"] if sys_prompt else []
+        for msg in turns:
+            role_label = "User" if msg["role"] == "user" else "Assistant"
+            parts.append(f"{role_label}: {msg['content']}")
+        parts.append("Assistant:")
+        return self.tokenizer.encode("\n\n".join(parts), return_tensors="pt")
 
     def _stop_token_ids(self) -> set[int]:
-        """Collect all EOS / end-of-turn token IDs for clean stopping."""
-        stop_ids: set[int] = set()
+        """Collect universal EOS / end-of-turn token IDs across model families."""
+        stop_ids: set[int] = set(self._model_eos_ids)
         eos = getattr(self.tokenizer, "eos_token_id", None)
         if isinstance(eos, int):
             stop_ids.add(eos)
         elif isinstance(eos, (list, tuple, set)):
             stop_ids.update(int(x) for x in eos)
 
-        for special in ("<|im_end|>", "<|eot_id|>", "<|endoftext|>"):
+        unk_id = getattr(self.tokenizer, "unk_token_id", None)
+        for special in ("<|im_end|>", "<|eot_id|>", "<end_of_turn>", "<|end|>", "<|endoftext|>", "</s>"):
             tid = self.tokenizer.convert_tokens_to_ids(special)
-            if isinstance(tid, int) and tid >= 0 and tid != self.tokenizer.unk_token_id:
+            if isinstance(tid, int) and tid >= 0 and tid != unk_id:
                 stop_ids.add(tid)
         return stop_ids
 
     def generate(self, prompt: str) -> Iterator[str]:
-        """Flowchart B: tokenize prompt and stream generated text token by token."""
+        """Flowchart B: tokenize prompt, stream tokens, and record conversation turn."""
         session_id = uuid.uuid4().hex[:12]
         self.engine.clear_session(session_id)
 
@@ -202,6 +241,9 @@ class ChatSession:
                 logits,
                 temperature=self.gen_config.temperature,
                 top_p=self.gen_config.top_p,
+                top_k=self.gen_config.top_k,
+                repetition_penalty=self.gen_config.repetition_penalty,
+                generated_ids=generated_ids,
             )
             if next_id in stop_ids:
                 break
@@ -221,6 +263,13 @@ class ChatSession:
                 token_pos=token_pos,
             )
             token_pos += 1
+
+        if prev_text.strip() and self.gen_config.history_turns > 0:
+            self.history.append({"role": "user", "content": prompt})
+            self.history.append({"role": "assistant", "content": prev_text.strip()})
+
+    def clear_history(self) -> None:
+        self.history.clear()
 
     def clear_caches(self) -> None:
         self.engine.clear_session()

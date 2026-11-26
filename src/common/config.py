@@ -27,13 +27,25 @@ class PeerTarget:
     mode: str = "outbound"
 
 
+DEFAULT_SYSTEM_PROMPT = (
+    "You are a helpful, direct, and realistic AI assistant. "
+    "Answer accurately and match the length of your reply to the question: "
+    "for simple or factual questions, answer in 1-2 clear sentences without filler; "
+    "only write longer explanations when the user asks for detail."
+)
+
+
 @dataclass(frozen=True)
 class GenerationConfig:
-    """Sampling and generation limits for the host."""
+    """Universal sampling, system prompt, and conversation limits for the host."""
 
     max_tokens: int = 512
-    temperature: float = 0.7
+    temperature: float = 0.5
     top_p: float = 0.9
+    top_k: int = 40
+    repetition_penalty: float = 1.1
+    history_turns: int = 6
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT
 
 
 @dataclass(frozen=True)
@@ -137,8 +149,12 @@ def load_host_config(path: str | Path) -> HostConfig:
         raise ValueError("'generation' in host config must be a mapping.")
     generation = GenerationConfig(
         max_tokens=int(raw_gen.get("max_tokens", 512)),
-        temperature=float(raw_gen.get("temperature", 0.7)),
+        temperature=float(raw_gen.get("temperature", 0.5)),
         top_p=float(raw_gen.get("top_p", 0.9)),
+        top_k=int(raw_gen.get("top_k", 40)),
+        repetition_penalty=float(raw_gen.get("repetition_penalty", 1.1)),
+        history_turns=int(raw_gen.get("history_turns", 6)),
+        system_prompt=str(raw_gen.get("system_prompt", DEFAULT_SYSTEM_PROMPT)),
     )
     if generation.max_tokens <= 0:
         raise ValueError("generation.max_tokens must be positive.")
@@ -146,6 +162,12 @@ def load_host_config(path: str | Path) -> HostConfig:
         raise ValueError("generation.temperature must be >= 0.")
     if not (0.0 < generation.top_p <= 1.0):
         raise ValueError("generation.top_p must be in (0, 1].")
+    if generation.top_k < 0:
+        raise ValueError("generation.top_k must be >= 0.")
+    if generation.repetition_penalty < 1.0:
+        raise ValueError("generation.repetition_penalty must be >= 1.0.")
+    if generation.history_turns < 0:
+        raise ValueError("generation.history_turns must be >= 0.")
 
     return HostConfig(
         model=model,

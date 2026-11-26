@@ -57,7 +57,7 @@ def run_repl(coordinator: Coordinator) -> None:
     """Run the V1 terminal chat loop until `/exit` or Ctrl+C."""
     console = Console()
     print_pipeline_table(console, coordinator)
-    console.print("[dim]Type a prompt and press Enter. Type /exit to quit.[/dim]\n")
+    console.print("[dim]Type a prompt and press Enter. Commands: /clear (reset chat), /exit (quit).[/dim]\n")
 
     session = ChatSession(coordinator, coordinator.config.generation)
 
@@ -73,6 +73,11 @@ def run_repl(coordinator: Coordinator) -> None:
                 continue
             if prompt == "/exit":
                 break
+            if prompt == "/clear":
+                session.clear_history()
+                session.clear_caches()
+                console.print("[dim]Conversation history cleared.[/dim]\n")
+                continue
 
             coordinator.raise_if_unhealthy()
 
