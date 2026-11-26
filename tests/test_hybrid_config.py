@@ -47,7 +47,7 @@ def test_outbound_peer_config_requires_both_host_address_and_port(tmp_path: Path
         """
 name: "kaggle-1"
 model: "models/qwen"
-host_address: "0.tcp.ngrok.io"
+host_address: "0.tcp.ngrok.io "
 host_port: 12345
 auth_token: "secret"
 """,

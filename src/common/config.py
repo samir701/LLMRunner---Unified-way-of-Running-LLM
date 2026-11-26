@@ -121,12 +121,12 @@ def load_host_config(path: str | Path) -> HostConfig:
                 raise ValueError(f"Outbound peer '{name}' is missing a valid 'address'.")
             if port is None:
                 raise ValueError(f"Outbound peer '{name}' is missing 'port'.")
-            peers.append(PeerTarget(name=name, address=address, port=int(port), mode=mode))
+            peers.append(PeerTarget(name=name.strip(), address=address.strip(), port=int(port), mode=mode))
         else:
             peers.append(
                 PeerTarget(
-                    name=name,
-                    address=str(address) if address else None,
+                    name=name.strip(),
+                    address=str(address).strip() if address else None,
                     port=int(port) if port is not None else None,
                     mode=mode,
                 )
@@ -210,7 +210,7 @@ def load_peer_config(path: str | Path) -> PeerConfig:
         model=model,
         device=device,
         layers=layers,
-        host_address=str(host_address) if host_address else None,
+        host_address=str(host_address).strip() if host_address else None,
         host_port=int(host_port) if host_port is not None else None,
         host_transport=host_transport,
         auth_token=auth_token,

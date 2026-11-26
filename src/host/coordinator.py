@@ -281,7 +281,7 @@ class Coordinator:
                         registered[peer_name].device_type,
                     )
                 except (TransportError, ValueError) as exc:
-                    logger.warning("Ignoring invalid inbound connection from %s:%d: %s", addr[0], addr[1], exc)
+                    logger.info("Ignoring non-peer inbound probe from %s:%d: %s", addr[0], addr[1], exc)
                     conn.close()
                     continue
                 except Exception:

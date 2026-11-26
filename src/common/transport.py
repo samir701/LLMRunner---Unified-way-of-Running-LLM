@@ -133,6 +133,15 @@ class TCPConnection:
         """Auto-detect an incoming HTTP WebSocket upgrade (`GET `) on the server side."""
         self._checked_upgrade = True
         first4 = self._recv_exact(4)
+        if first4 in (b"HEAD", b"POST", b"PUT ", b"OPTI", b"PRI "):
+            self._sock.sendall(
+                b"HTTP/1.1 426 Upgrade Required\r\n"
+                b"Content-Type: text/plain\r\n"
+                b"Content-Length: 27\r\n"
+                b"Connection: close\r\n\r\n"
+                b"WebSocket upgrade required."
+            )
+            raise ConnectionClosedError(f"Received non-WebSocket HTTP request ({first4!r}).")
         if first4 != b"GET ":
             # Normal raw TCP stream: store the 4 bytes back in a tiny pre-buffer.
             self._prebuffer = first4
@@ -302,6 +311,7 @@ def connect(
     transport: str = "tcp",
 ) -> TCPConnection:
     """Open a persistent TCP or WebSocket-over-TLS (`wss`) connection."""
+    address = address.strip()
     target_label = label or f"{address}:{port}"
     try:
         sock = socket.create_connection((address, port), timeout=timeout)
