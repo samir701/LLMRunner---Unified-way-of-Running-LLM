@@ -48,3 +48,19 @@ def test_validate_detects_gaps_and_overlaps() -> None:
 
     with pytest.raises(ValueError, match="end at"):
         validate_layer_ranges([LayerRange(0, 9), LayerRange(10, 29)], total_layers=32)
+
+
+def test_gpu_peers_receive_bulk_of_layers_over_cpu_host() -> None:
+    nodes = [
+        NodeMemoryInfo("cpu-host", free_memory_bytes=16 * 1024**3, device_type="cpu", device_name="cpu"),
+        NodeMemoryInfo("kaggle-t4", free_memory_bytes=15 * 1024**3, device_type="cuda", device_name="Tesla T4"),
+        NodeMemoryInfo("home-4090", free_memory_bytes=24 * 1024**3, device_type="cuda", device_name="NVIDIA GeForce RTX 4090"),
+    ]
+    ranges = compute_shard_assignments(total_layers=24, nodes=nodes)
+    validate_layer_ranges(ranges, total_layers=24)
+
+    # CPU host only gets 1 layer so it doesn't bottleneck the GPUs.
+    assert ranges[0].count == 1
+    # Faster/larger RTX 4090 gets more layers than Tesla T4.
+    assert ranges[2].count > ranges[1].count
+

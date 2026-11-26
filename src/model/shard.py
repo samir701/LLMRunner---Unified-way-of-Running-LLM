@@ -26,11 +26,30 @@ class LayerRange:
 
 @dataclass(frozen=True)
 class NodeMemoryInfo:
-    """Memory capacity and optional fixed layer range for a pipeline node."""
+    """Memory capacity, compute device tier, and optional fixed layers for a node."""
 
     name: str
     free_memory_bytes: int
+    device_type: str = "cpu"
+    device_name: str = ""
     fixed_layers: tuple[int, int] | None = None
+
+
+def gpu_tier_multiplier(device_type: str, device_name: str = "") -> float:
+    """Compute a relative throughput multiplier based on device type and GPU model."""
+    if device_type != "cuda":
+        return 1.0
+
+    upper = device_name.upper()
+    if any(tag in upper for tag in ("H100", "H200", "B100", "B200")):
+        return 3.0
+    if any(tag in upper for tag in ("A100", "RTX 5090", "RTX 4090", "L40")):
+        return 2.5
+    if any(tag in upper for tag in ("L4", "A10", "RTX 40", "RTX 3090", "RTX 3080")):
+        return 2.0
+    if any(tag in upper for tag in ("V100", "RTX 30", "RTX 20", "A4000", "T4", "P100")):
+        return 1.3
+    return 1.2
 
 
 def validate_layer_ranges(ranges: list[LayerRange], total_layers: int) -> None:
@@ -61,10 +80,12 @@ def compute_shard_assignments(
 ) -> list[LayerRange]:
     """Compute contiguous layer ranges for `[host, peer_1, ..., peer_n]`.
 
-    If all peers specify `fixed_layers`, the host receives the remaining prefix
-    `[0, first_peer_start - 1]` and the full pipeline is validated for contiguous
-    coverage. Otherwise, layers are distributed proportionally to each node's
-    `free_memory_bytes` (guaranteeing at least 1 layer per node).
+    - If peers specify `fixed_layers`, validates full contiguous coverage.
+    - If GPU (`cuda`) and CPU nodes are mixed, CPU nodes receive 1 layer minimum so
+      they don't bottleneck inference, and remaining layers are split across GPU nodes
+      proportionally to `(free_VRAM * gpu_tier_multiplier)`.
+    - If all nodes are the same class (all CPU or all GPU), splits proportionally to
+      `free_memory_bytes * gpu_tier_multiplier`.
     """
     if total_layers <= 0:
         raise ValueError(f"total_layers must be positive, got {total_layers}.")
@@ -93,19 +114,32 @@ def compute_shard_assignments(
         validate_layer_ranges(all_ranges, total_layers)
         return all_ranges
 
-    # Automatic memory-proportional assignment (Hamilton / largest-remainder method).
-    weights = [max(1, n.free_memory_bytes) for n in nodes]
-    total_weight = sum(weights)
+    has_gpu = any(n.device_type == "cuda" for n in nodes)
+    has_cpu = any(n.device_type != "cuda" for n in nodes)
 
-    # Give every node at least 1 layer first, then distribute the remaining layers.
+    # Give every node at least 1 layer first.
     remaining = total_layers - len(nodes)
     counts = [1] * len(nodes)
+
     if remaining > 0:
+        if has_gpu and has_cpu:
+            # Keep CPU-only nodes at 1 layer so GPU peers handle the heavy compute.
+            weights = [
+                max(1.0, n.free_memory_bytes * gpu_tier_multiplier(n.device_type, n.device_name))
+                if n.device_type == "cuda"
+                else 0.0
+                for n in nodes
+            ]
+        else:
+            weights = [
+                max(1.0, n.free_memory_bytes * gpu_tier_multiplier(n.device_type, n.device_name))
+                for n in nodes
+            ]
+
+        total_weight = sum(weights)
         exact_shares = [remaining * w / total_weight for w in weights]
         floors = [int(s) for s in exact_shares]
-        remainders = [
-            (exact_shares[i] - floors[i], i) for i in range(len(nodes))
-        ]
+        remainders = [(exact_shares[i] - floors[i], i) for i in range(len(nodes)) if weights[i] > 0]
         for i in range(len(nodes)):
             counts[i] += floors[i]
         leftover = remaining - sum(floors)

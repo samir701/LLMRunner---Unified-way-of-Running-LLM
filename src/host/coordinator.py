@@ -31,6 +31,7 @@ from src.common.transport import (
 )
 from src.model.loader import (
     LoadedShard,
+    get_device_name,
     get_free_memory_bytes,
     get_num_layers,
     load_model_shard,
@@ -51,6 +52,7 @@ class ConnectedPeer:
     device_type: str
     free_memory_bytes: int
     fixed_layers: tuple[int, int] | None
+    device_name: str = ""
     layer_range: LayerRange | None = None
     is_last: bool = False
 
@@ -74,6 +76,9 @@ class Coordinator:
     def __init__(self, config: HostConfig) -> None:
         self.config = config
         self.host_name = get_local_hostname()
+        self.host_device_type = "cpu"
+        self.host_device_name = "cpu"
+        self.host_free_memory_bytes = 0
         self.peers: list[ConnectedPeer] = []
         self.host_range: LayerRange | None = None
         self.host_shard: LoadedShard | None = None
@@ -183,6 +188,7 @@ class Coordinator:
                 target=target,
                 conn=conn,
                 device_type=str(reply.header.get("device_type", "cpu")),
+                device_name=str(reply.header.get("device_name", "")),
                 free_memory_bytes=int(reply.header.get("free_memory_bytes", 0)),
                 fixed_layers=fixed,
             )
@@ -270,6 +276,7 @@ class Coordinator:
                         target=expected[peer_name],
                         conn=conn,
                         device_type=str(reply.header.get("device_type", "cpu")),
+                        device_name=str(reply.header.get("device_name", "")),
                         free_memory_bytes=int(reply.header.get("free_memory_bytes", 0)),
                         fixed_layers=fixed,
                     )
@@ -303,10 +310,14 @@ class Coordinator:
 
         host_device = resolve_device("auto")
         host_free_mem = get_free_memory_bytes(host_device)
+        self.host_device_type = host_device.type
+        self.host_device_name = get_device_name(host_device)
+        self.host_free_memory_bytes = host_free_mem
         logger.info(
-            "Host '%s' (%s) free memory: %.2f GiB, model layers: %d",
+            "Host '%s' (%s / %s) free memory: %.2f GiB, model layers: %d",
             self.host_name,
-            host_device,
+            self.host_device_type,
+            self.host_device_name,
             host_free_mem / (1024**3),
             self.total_layers,
         )
@@ -353,12 +364,21 @@ class Coordinator:
             self.use_relay = len(inbound_targets) > 0
 
         # Compute contiguous shard assignments across [host, peer_1, ..., peer_n].
-        nodes = [NodeMemoryInfo(name=self.host_name, free_memory_bytes=host_free_mem)]
+        nodes = [
+            NodeMemoryInfo(
+                name=self.host_name,
+                free_memory_bytes=host_free_mem,
+                device_type=self.host_device_type,
+                device_name=self.host_device_name,
+            )
+        ]
         for p in self.peers:
             nodes.append(
                 NodeMemoryInfo(
                     name=p.target.name,
                     free_memory_bytes=p.free_memory_bytes,
+                    device_type=p.device_type,
+                    device_name=p.device_name,
                     fixed_layers=p.fixed_layers,
                 )
             )

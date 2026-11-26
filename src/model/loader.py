@@ -48,6 +48,14 @@ def resolve_device(preference: str = "auto") -> torch.device:
     return torch.device(preference)
 
 
+def get_device_name(device: torch.device) -> str:
+    """Return a human-readable device name (e.g. 'Tesla T4' for CUDA, 'cpu' for CPU)."""
+    if device.type == "cuda":
+        idx = device.index if device.index is not None else torch.cuda.current_device()
+        return str(torch.cuda.get_device_name(idx))
+    return "cpu"
+
+
 def get_free_memory_bytes(device: torch.device) -> int:
     """Return available VRAM (for CUDA) or system RAM (for CPU) in bytes."""
     if device.type == "cuda":

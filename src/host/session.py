@@ -149,12 +149,42 @@ class ChatSession:
 
         raise RuntimeError("No peers configured in pipeline.")
 
+    def _encode_prompt(self, prompt: str) -> torch.Tensor:
+        """Apply chat template when available (for Instruct models) and tokenize."""
+        if getattr(self.tokenizer, "chat_template", None):
+            formatted = self.tokenizer.apply_chat_template(
+                [{"role": "user", "content": prompt}],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            return self.tokenizer.encode(
+                formatted,
+                add_special_tokens=False,
+                return_tensors="pt",
+            )
+        return self.tokenizer.encode(prompt, return_tensors="pt")
+
+    def _stop_token_ids(self) -> set[int]:
+        """Collect all EOS / end-of-turn token IDs for clean stopping."""
+        stop_ids: set[int] = set()
+        eos = getattr(self.tokenizer, "eos_token_id", None)
+        if isinstance(eos, int):
+            stop_ids.add(eos)
+        elif isinstance(eos, (list, tuple, set)):
+            stop_ids.update(int(x) for x in eos)
+
+        for special in ("<|im_end|>", "<|eot_id|>", "<|endoftext|>"):
+            tid = self.tokenizer.convert_tokens_to_ids(special)
+            if isinstance(tid, int) and tid >= 0 and tid != self.tokenizer.unk_token_id:
+                stop_ids.add(tid)
+        return stop_ids
+
     def generate(self, prompt: str) -> Iterator[str]:
         """Flowchart B: tokenize prompt and stream generated text token by token."""
         session_id = uuid.uuid4().hex[:12]
         self.engine.clear_session(session_id)
 
-        input_ids = self.tokenizer.encode(prompt, return_tensors="pt")
+        input_ids = self._encode_prompt(prompt)
         if input_ids.numel() == 0:
             return
 
@@ -166,14 +196,14 @@ class ChatSession:
         logits = self._run_pipeline_step(input_ids, session_id=session_id, token_pos=token_pos)
         token_pos += input_ids.shape[1]
 
-        eos_id = self.tokenizer.eos_token_id
+        stop_ids = self._stop_token_ids()
         for _ in range(self.gen_config.max_tokens):
             next_id = sample_next_token(
                 logits,
                 temperature=self.gen_config.temperature,
                 top_p=self.gen_config.top_p,
             )
-            if eos_id is not None and next_id == eos_id:
+            if next_id in stop_ids:
                 break
 
             generated_ids.append(next_id)

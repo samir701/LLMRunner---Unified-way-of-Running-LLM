@@ -29,7 +29,12 @@ from src.common.transport import (
     listen,
 )
 from src.model.engine import ShardEngine
-from src.model.loader import get_free_memory_bytes, load_model_shard, resolve_device
+from src.model.loader import (
+    get_device_name,
+    get_free_memory_bytes,
+    load_model_shard,
+    resolve_device,
+)
 from src.model.shard import LayerRange
 from src.peer.worker import ShardWorker
 
@@ -128,11 +133,13 @@ def _run_session(
             raise TransportError("Host failed auth_token verification.")
 
         free_mem = get_free_memory_bytes(device)
+        device_name = get_device_name(device)
         host_conn.send_message(
             info_msg(
                 peer_name=config.name,
                 free_memory_bytes=free_mem,
                 device_type=device.type,
+                device_name=device_name,
                 ready=True,
                 fixed_layers=config.layers,
             )

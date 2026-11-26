@@ -103,11 +103,13 @@ def info_msg(
     device_type: str,
     ready: bool = True,
     fixed_layers: tuple[int, int] | None = None,
+    device_name: str = "",
 ) -> Message:
     header: dict[str, Any] = {
         "peer_name": peer_name,
         "free_memory_bytes": free_memory_bytes,
         "device_type": device_type,
+        "device_name": device_name,
         "ready": ready,
     }
     if fixed_layers is not None:
