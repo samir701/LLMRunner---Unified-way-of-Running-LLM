@@ -248,6 +248,7 @@ def run_peer_server(config: PeerConfig) -> None:
                         config.host_port,
                         timeout=15.0,
                         label=f"host({config.host_address}:{config.host_port})",
+                        transport=config.host_transport,
                     )
                     host_conn.send_message(
                         register_msg(

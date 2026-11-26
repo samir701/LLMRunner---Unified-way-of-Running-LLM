@@ -5,6 +5,7 @@ device: "auto"                   # auto = GPU if available, else CPU
 # layers: [10, 20]               # optional - 0-based inclusive [start, end]; if omitted, host assigns it
 
 # --- For Global / WAN / Kaggle / NAT peers (connect outbound to host) ---
-# host_address: "0.tcp.ngrok.io" # Host's public IP, Tailscale IP, or TCP tunnel hostname
-# host_port: 12345               # Host's public/tunneled port (maps to host listen_port)
-# auth_token: "my-secret-token"  # Must match host.yaml if set
+# host_address: "example.trycloudflare.com" # Host's tunnel/public hostname
+# host_port: 443                            # Use 443 with host_transport: "wss" for Kaggle
+# host_transport: "wss"                     # "tcp" (default) or "wss" (WebSocket over port 443)
+# auth_token: "my-secret-token"             # Must match host.yaml if set

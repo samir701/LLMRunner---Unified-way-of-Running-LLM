@@ -60,6 +60,7 @@ class PeerConfig:
     layers: tuple[int, int] | None = None
     host_address: str | None = None
     host_port: int | None = None
+    host_transport: str = "tcp"  # "tcp", "ws", or "wss" (for port 443 / Cloudflare Tunnel)
     auth_token: str | None = None
 
 
@@ -193,6 +194,12 @@ def load_peer_config(path: str | Path) -> PeerConfig:
     if (host_address is None) != (host_port is None):
         raise ValueError("Specify both 'host_address' and 'host_port' for outbound peer mode.")
 
+    host_transport = str(data.get("host_transport", "tcp"))
+    if host_transport not in ("tcp", "ws", "wss"):
+        raise ValueError(
+            f"Unsupported host_transport '{host_transport}'. Use 'tcp', 'ws', or 'wss'."
+        )
+
     auth_token = data.get("auth_token")
     if auth_token is not None:
         auth_token = str(auth_token)
@@ -205,5 +212,6 @@ def load_peer_config(path: str | Path) -> PeerConfig:
         layers=layers,
         host_address=str(host_address) if host_address else None,
         host_port=int(host_port) if host_port is not None else None,
+        host_transport=host_transport,
         auth_token=auth_token,
     )
