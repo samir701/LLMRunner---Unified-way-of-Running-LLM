@@ -280,6 +280,10 @@ class Coordinator:
                         addr[1],
                         registered[peer_name].device_type,
                     )
+                except (TransportError, ValueError) as exc:
+                    logger.warning("Ignoring invalid inbound connection from %s:%d: %s", addr[0], addr[1], exc)
+                    conn.close()
+                    continue
                 except Exception:
                     conn.close()
                     raise

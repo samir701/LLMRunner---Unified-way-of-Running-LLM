@@ -153,7 +153,14 @@ class TCPConnection:
                 ws_key = line.split(":", 1)[1].strip()
                 break
         if not ws_key:
-            raise TransportError("Invalid WebSocket upgrade request: missing Sec-WebSocket-Key.")
+            self._sock.sendall(
+                b"HTTP/1.1 426 Upgrade Required\r\n"
+                b"Content-Type: text/plain\r\n"
+                b"Content-Length: 27\r\n"
+                b"Connection: close\r\n\r\n"
+                b"WebSocket upgrade required."
+            )
+            raise ConnectionClosedError("Received plain HTTP request without Sec-WebSocket-Key.")
 
         accept_val = _ws_accept_key(ws_key)
         response = (
