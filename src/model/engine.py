@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+
 import torch
 from transformers.cache_utils import DynamicCache
 
@@ -84,14 +86,25 @@ class ShardEngine:
             mask = torch.triu(mask, diagonal=token_pos + 1)
             attention_mask = mask.unsqueeze(0).unsqueeze(0).expand(batch_size, 1, -1, -1)
 
+        cache_position = torch.arange(
+            token_pos,
+            token_pos + seq_len,
+            device=self.shard.device,
+            dtype=torch.long,
+        )
+
         for idx in range(self.shard.layer_range.start, self.shard.layer_range.end + 1):
             layer = self.shard.layers[str(idx)]
+            fwd_params = inspect.signature(layer.forward).parameters
+            cache_arg = "past_key_values" if "past_key_values" in fwd_params else "past_key_value"
             kwargs: dict = {
                 "attention_mask": attention_mask,
                 "position_ids": position_ids,
-                "past_key_value": cache,
+                cache_arg: cache,
                 "use_cache": True,
             }
+            if "cache_position" in fwd_params:
+                kwargs["cache_position"] = cache_position
             if position_embeddings is not None:
                 kwargs["position_embeddings"] = position_embeddings
 

@@ -6,6 +6,7 @@ it for a LoadedShard or tokenizer.
 
 from __future__ import annotations
 
+import inspect
 import json
 import os
 from dataclasses import dataclass
@@ -207,10 +208,20 @@ def load_model_shard(
 
     rotary_emb: nn.Module | None = getattr(inner_model, "rotary_emb", None)
     if rotary_emb is not None:
-        rotary_emb = rotary_emb.to_empty(device=device)
-        # Re-initialize buffers (e.g. inv_freq) on target device.
-        if hasattr(rotary_emb, "inv_freq"):
-            rotary_emb = type(rotary_emb)(config=config, device=device)
+        rotary_cls = type(rotary_emb)
+        init_params = inspect.signature(rotary_cls.__init__).parameters
+        if "config" in init_params and "device" in init_params:
+            rotary_emb = rotary_cls(config=config, device=device)
+        elif "config" in init_params:
+            rotary_emb = rotary_cls(config=config).to(device)
+        else:
+            with torch.device(device):
+                rotary_emb = rotary_cls(config)
+        if (
+            hasattr(rotary_emb, "original_inv_freq")
+            and isinstance(rotary_emb.original_inv_freq, torch.Tensor)
+        ):
+            rotary_emb.original_inv_freq = rotary_emb.original_inv_freq.to(device)
         rotary_emb.eval()
 
     norm: nn.Module | None = None
