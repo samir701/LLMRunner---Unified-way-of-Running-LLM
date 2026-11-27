@@ -118,10 +118,17 @@
             <h3>Step 3 — Tailscale &amp; Funnel (Global / Kaggle Networking)</h3>
             <p class="wiz-desc">Install and sign in to Tailscale, then expose port <code>5000</code> with Funnel so Kaggle GPUs &amp; remote friends can connect over HTTPS/WSS port <code>443</code>.</p>
             <div class="wiz-status-box" id="wizTailscaleDetails">Checking Tailscale...</div>
+            <div class="dl-status hidden" id="wizTsUrlRow">
+              <span id="wizTsUrlText">Tailscale approval link ready:</span>
+              <button class="btn-xs btn-primary" id="wizOpenTsUrlBtn">Open in Browser</button>
+            </div>
             <div class="wiz-actions">
               <button class="btn btn-accent" id="wizInstallTsBtn">1. Install Tailscale</button>
               <button class="btn btn-accent" id="wizLoginTsBtn">2. Sign In (tailscale up)</button>
               <button class="btn btn-primary" id="wizFunnelTsBtn">3. Enable Funnel (:5000)</button>
+              <button class="btn btn-danger" id="wizFunnelOffBtn">Disable Funnel</button>
+              <button class="btn btn-ghost" id="wizCopyTsHostBtn">Copy *.ts.net</button>
+              <button class="btn btn-ghost" id="wizOpenDnsBtn">DNS Settings</button>
               <button class="btn btn-ghost" onclick="setWizardStep(4)">Next: Model &amp; Finish →</button>
             </div>
           </div>

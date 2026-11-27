@@ -9,6 +9,7 @@ ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 datas = [
     (os.path.join(ROOT, "src", "gui", "web"), "src/gui/web"),
     (os.path.join(ROOT, "config"), "config"),
+    (os.path.join(ROOT, "requirements.txt"), "."),
 ]
 binaries = []
 hiddenimports = [
@@ -41,9 +42,23 @@ hiddenimports = [
     "safetensors",
     "safetensors.torch",
     "huggingface_hub",
+    "typer",
+    "rich",
+    "numpy",
 ]
 
-for pkg in ("webview", "clr_loader", "pythonnet", "transformers", "tokenizers"):
+for pkg in (
+    "webview",
+    "clr_loader",
+    "pythonnet",
+    "transformers",
+    "tokenizers",
+    "safetensors",
+    "huggingface_hub",
+    "typer",
+    "rich",
+    "yaml",
+):
     p_datas, p_bins, p_hidden = collect_all(pkg)
     datas += p_datas
     binaries += p_bins

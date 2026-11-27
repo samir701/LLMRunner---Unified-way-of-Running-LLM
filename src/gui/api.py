@@ -27,6 +27,7 @@ from src.gui.setup_wizard import (
     install_requirements,
     install_tailscale,
     mark_setup_complete,
+    tailscale_disable_funnel,
     tailscale_enable_funnel,
     tailscale_login,
 )
@@ -327,6 +328,9 @@ class DesktopAPI:
         def emit_line(line: str) -> None:
             self._emit("setup_log", {"line": line})
 
+        def emit_url(url: str) -> None:
+            self._emit("setup_url", {"url": url})
+
         def worker() -> None:
             try:
                 if action == "install_python":
@@ -336,10 +340,17 @@ class DesktopAPI:
                 elif action == "install_tailscale":
                     install_tailscale(emit_line)
                 elif action == "tailscale_login":
-                    tailscale_login(emit_line)
+                    tailscale_login(emit_line, on_url=emit_url)
                 elif action == "tailscale_funnel":
                     port = int(opts.get("port", 5000))
-                    tailscale_enable_funnel(port, emit_line)
+                    tailscale_enable_funnel(port, emit_line, on_url=emit_url)
+                elif action == "tailscale_funnel_off":
+                    tailscale_disable_funnel(emit_line)
+                elif action == "open_url":
+                    import webbrowser
+                    url = str(opts.get("url", "")).strip()
+                    if url:
+                        webbrowser.open(url)
                 else:
                     raise ValueError(f"Unknown setup action: {action}")
                 self._emit("setup_action_done", {"action": action, "ok": True, "setup": check_environment()})

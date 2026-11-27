@@ -256,10 +256,17 @@ window.__onBackendEvent = function ({ event, data }) {
     appendLog($("hostLogConsole"), data.line);
   } else if (event === "setup_log") {
     appendLog($("wizConsole"), data.line);
+  } else if (event === "setup_url") {
+    state.lastTsUrl = data.url;
+    $("wizTsUrlRow").classList.remove("hidden");
+    $("wizTsUrlText").textContent = `Approval required: ${data.url}`;
   } else if (event === "setup_action_done") {
     setWizardBusy(false);
     if (data.setup) renderSetupStatus(data.setup);
     if (data.ok) {
+      if (data.action === "tailscale_funnel" || data.action === "tailscale_login") {
+        $("wizTsUrlRow").classList.add("hidden");
+      }
       showToast("Setup step completed", "success");
     } else {
       showToast(data.error || "Setup step failed", "error");
@@ -268,20 +275,29 @@ window.__onBackendEvent = function ({ event, data }) {
     if (data.status === "downloading") {
       $("dlProgressRow").classList.remove("hidden");
       $("confirmDlBtn").disabled = true;
+      $("wizDownloadModelBtn").disabled = true;
+      $("wizDownloadModelBtn").textContent = "Downloading...";
       $("dlStatusText").textContent = `Downloading ${data.repo_id} into models/...`;
       appendLog($("wizConsole"), `Downloading ${data.repo_id} into models/...`);
     } else if (data.status === "done") {
       $("dlProgressRow").classList.add("hidden");
       $("confirmDlBtn").disabled = false;
+      $("wizDownloadModelBtn").disabled = false;
+      $("wizDownloadModelBtn").textContent = "Download Selected Model";
       $("downloadModal").classList.add("hidden");
       if (data.target_role === "peer") $("peerModel").value = data.path;
       else $("hostModel").value = data.path;
       appendLog($("wizConsole"), `Model saved to ${data.path}`);
-      window.pywebview.api.get_setup_status().then(renderSetupStatus).catch(() => {});
+      window.pywebview.api.get_setup_status().then((st) => {
+        renderSetupStatus(st);
+        if (data.path) $("wizLocalModels").value = data.path;
+      }).catch(() => {});
       showToast(`Model saved to ${data.path}`, "success");
     } else if (data.status === "error") {
       $("dlProgressRow").classList.add("hidden");
       $("confirmDlBtn").disabled = false;
+      $("wizDownloadModelBtn").disabled = false;
+      $("wizDownloadModelBtn").textContent = "Download Selected Model";
       appendLog($("wizConsole"), `Download error: ${data.error}`);
       showToast(`Download failed: ${data.error}`, "error");
     }
@@ -571,6 +587,21 @@ function setupBindings() {
   $("wizLoginTsBtn").onclick = () => runWizardAction("tailscale_login");
   $("wizFunnelTsBtn").onclick = () =>
     runWizardAction("tailscale_funnel", { port: Number($("hostListenPort").value || 5000) });
+  $("wizFunnelOffBtn").onclick = () => runWizardAction("tailscale_funnel_off");
+  $("wizOpenTsUrlBtn").onclick = () => {
+    if (state.lastTsUrl) window.pywebview.api.run_setup_action("open_url", { url: state.lastTsUrl });
+  };
+  $("wizOpenDnsBtn").onclick = () =>
+    window.pywebview.api.run_setup_action("open_url", { url: "https://login.tailscale.com/admin/dns" });
+  $("wizCopyTsHostBtn").onclick = async () => {
+    if (!state.lastTailscaleDns) return showToast("No *.ts.net hostname detected yet.", "error");
+    try {
+      await navigator.clipboard.writeText(state.lastTailscaleDns);
+      showToast(`Copied: ${state.lastTailscaleDns}`, "success");
+    } catch {
+      showToast(state.lastTailscaleDns, "info");
+    }
+  };
 
   $("wizDownloadModelBtn").onclick = async () => {
     try {
@@ -612,7 +643,14 @@ window.setWizardStep = function (step) {
 };
 
 function setWizardBusy(busy) {
-  ["wizInstallPythonBtn", "wizInstallDepsBtn", "wizInstallTsBtn", "wizLoginTsBtn", "wizFunnelTsBtn"].forEach((id) => {
+  [
+    "wizInstallPythonBtn",
+    "wizInstallDepsBtn",
+    "wizInstallTsBtn",
+    "wizLoginTsBtn",
+    "wizFunnelTsBtn",
+    "wizFunnelOffBtn",
+  ].forEach((id) => {
     $(id).disabled = busy;
   });
 }
@@ -633,12 +671,19 @@ function renderSetupStatus(setup) {
   ].join("\n");
 
   const deps = setup.dependencies || {};
-  $("wizBadgeDeps").textContent = deps.ok ? "All Installed" : `Missing ${deps.missing.length}`;
+  const readyForApp = deps.ok;
+  $("wizBadgeDeps").textContent = readyForApp
+    ? (deps.venv_ok ? "All Ready (.venv + App)" : "App Ready")
+    : `Missing ${deps.missing.length}`;
   const verPairs = Object.entries(deps.versions || {}).map(([k, v]) => `${k}==${v}`).join(", ");
+  const venvSummary = deps.venv_ok
+    ? "All packages installed in .venv"
+    : `Missing in .venv: ${(deps.venv_missing || []).join(", ")}`;
   $("wizDepsDetails").textContent = [
-    `Runtime Dependencies: ${deps.ok ? "All core packages ready" : `Missing: ${deps.missing.join(", ")}`}`,
+    `App / EXE Runtime   : ${deps.ok ? "All 9 core packages ready" : `Missing: ${deps.missing.join(", ")}`}`,
     `Loaded Versions     : ${verPairs || "-"}`,
-    `requirements.txt    : ${deps.requirements_exists ? "Present in workspace" : "Not in current directory"}`,
+    `Local .venv Status  : ${venvSummary}`,
+    `requirements.txt    : ${deps.requirements_exists ? "Found" : "Not found"}`,
   ].join("\n");
 
   const ts = setup.tailscale || {};
@@ -655,10 +700,11 @@ function renderSetupStatus(setup) {
   $("wizTailscaleDetails").textContent = [
     `Installed    : ${ts.installed ? `Yes (${ts.exe})` : "No"}`,
     `Status       : ${ts.backend_state || "Unknown"}`,
-    `MagicDNS Host: ${ts.dns_name || "-"} (copy this into peer.yaml host_address!)`,
+    `MagicDNS Host: ${ts.dns_name || "-"}`,
     `Tailscale IP : ${ts.ip || "-"}`,
-    `Funnel :5000 : ${ts.funnel_active ? "Active (Port 443 ready for Kaggle & WAN)" : "Not enabled yet"}`,
-  ].join("\n");
+    `Funnel :5000 : ${ts.funnel_active ? "ACTIVE on port 443" : "Off"}`,
+    ts.funnel_detail ? `Funnel Info  :\n${ts.funnel_detail}` : "",
+  ].filter(Boolean).join("\n");
 
   const models = setup.models || [];
   $("wizBadgeModel").textContent = models.length > 0 ? `${models.length} model(s)` : "No model yet";
