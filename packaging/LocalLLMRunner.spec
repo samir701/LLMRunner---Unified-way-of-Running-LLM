@@ -17,6 +17,7 @@ hiddenimports = [
     "src.gui",
     "src.gui.app",
     "src.gui.api",
+    "src.gui.setup_wizard",
     "src.common",
     "src.common.config",
     "src.common.messages",

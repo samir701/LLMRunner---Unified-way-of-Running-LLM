@@ -12,6 +12,7 @@ dist/
 # Local configs (contain machine-specific LAN IPs and ports)
 config/host.yaml
 config/peer.yaml
+config/.setup_done
 
 # Model weights and runtime logs
 models/*

@@ -21,6 +21,15 @@ from src.common.config import (
     load_host_config,
     load_peer_config,
 )
+from src.gui.setup_wizard import (
+    check_environment,
+    install_python,
+    install_requirements,
+    install_tailscale,
+    mark_setup_complete,
+    tailscale_enable_funnel,
+    tailscale_login,
+)
 from src.host.coordinator import Coordinator
 from src.host.session import ChatSession
 from src.model.loader import get_device_name, get_free_memory_bytes, resolve_device
@@ -302,7 +311,86 @@ class DesktopAPI:
             "peer_path": "config/peer.yaml",
             "peer_config": peer_cfg,
             "hardware": self.detect_hardware("auto"),
+            "setup": check_environment(),
         }
+
+    # ------------------------------------------------------------------
+    # First-Run Installation & Setup Wizard
+    # ------------------------------------------------------------------
+
+    def get_setup_status(self) -> dict[str, Any]:
+        return check_environment()
+
+    def run_setup_action(self, action: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        opts = payload or {}
+
+        def emit_line(line: str) -> None:
+            self._emit("setup_log", {"line": line})
+
+        def worker() -> None:
+            try:
+                if action == "install_python":
+                    install_python(emit_line)
+                elif action == "install_requirements":
+                    install_requirements(emit_line)
+                elif action == "install_tailscale":
+                    install_tailscale(emit_line)
+                elif action == "tailscale_login":
+                    tailscale_login(emit_line)
+                elif action == "tailscale_funnel":
+                    port = int(opts.get("port", 5000))
+                    tailscale_enable_funnel(port, emit_line)
+                else:
+                    raise ValueError(f"Unknown setup action: {action}")
+                self._emit("setup_action_done", {"action": action, "ok": True, "setup": check_environment()})
+            except Exception as exc:
+                emit_line(f"ERROR: {exc}")
+                self._emit(
+                    "setup_action_done",
+                    {"action": action, "ok": False, "error": str(exc), "setup": check_environment()},
+                )
+
+        threading.Thread(target=worker, daemon=True).start()
+        return {"ok": True}
+
+    def complete_setup(self, options: dict[str, Any] | None = None) -> dict[str, Any]:
+        opts = options or {}
+        mark_setup_complete()
+        role = str(opts.get("role", "host"))
+        model = str(opts.get("model", "")).strip()
+        auth_token = str(opts.get("auth_token", "")).strip()
+        host_address = str(opts.get("host_address", "")).strip()
+
+        # Apply starter model / token / Tailscale address into host.yaml or peer.yaml if requested.
+        if model or auth_token:
+            host_path = self._resolve_default_yaml("config/host.yaml", "config/host.example.yaml")
+            try:
+                h_data = _host_config_to_dict(load_host_config(host_path))
+                if model:
+                    h_data["model"] = model
+                if auth_token:
+                    h_data["auth_token"] = auth_token
+                self.save_host_yaml("config/host.yaml", h_data)
+            except Exception:
+                pass
+
+            peer_path = self._resolve_default_yaml("config/peer.yaml", "config/peer.example.yaml")
+            try:
+                p_data = _peer_config_to_dict(load_peer_config(peer_path))
+                if model:
+                    p_data["model"] = model
+                if auth_token:
+                    p_data["auth_token"] = auth_token
+                if host_address:
+                    p_data["conn_mode"] = "wan"
+                    p_data["host_address"] = host_address
+                    p_data["host_port"] = 443
+                    p_data["host_transport"] = "wss"
+                self.save_peer_yaml("config/peer.yaml", p_data)
+            except Exception:
+                pass
+
+        return {"ok": True, "role": role, "state": self.get_initial_state()}
 
     def detect_hardware(self, device_pref: str = "auto") -> dict[str, Any]:
         try:

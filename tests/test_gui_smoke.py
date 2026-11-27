@@ -79,6 +79,7 @@ def test_webview_window_loads_frontend_and_js_bridge() -> None:
         result["title"] = win.evaluate_js("document.title")
         result["has_host"] = win.evaluate_js("Boolean(document.getElementById('hostSection'))")
         result["has_peer"] = win.evaluate_js("Boolean(document.getElementById('peerSection'))")
+        result["has_wizard"] = win.evaluate_js("Boolean(document.getElementById('setupWizard'))")
         win.destroy()
 
     win.events.closing += lambda: api.shutdown(silent=True)
@@ -86,3 +87,4 @@ def test_webview_window_loads_frontend_and_js_bridge() -> None:
     assert result["title"] == "Local LLM Runner V2"
     assert result["has_host"] is True
     assert result["has_peer"] is True
+    assert result["has_wizard"] is True

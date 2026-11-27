@@ -35,6 +35,7 @@
     </div>
 
     <div class="topbar-right">
+      <button class="btn-xs btn-accent" id="openWizardBtn">Setup Wizard</button>
       <span class="compat-badge" title="100% protocol compatible with V1/V2 CLI & Kaggle peers">CLI-Compatible</span>
       <div class="status-pill" id="globalStatusPill" data-state="IDLE">
         <span class="pulse-dot"></span>
@@ -42,6 +43,136 @@
       </div>
     </div>
   </header>
+
+  <!-- FIRST-RUN INSTALLATION & SETUP WIZARD -->
+  <section class="wizard-overlay hidden" id="setupWizard">
+    <div class="wizard-shell">
+      <div class="wizard-top">
+        <div>
+          <div class="wizard-title">Installation &amp; Environment Setup Wizard</div>
+          <div class="wizard-sub">Verify or install Python, <code>requirements.txt</code>, Tailscale &amp; Funnel, and your first LLM before starting.</div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-ghost btn-sm" id="wizRefreshBtn">Refresh Checks</button>
+          <button class="btn btn-ghost btn-sm" id="wizSkipBtn">Skip to App →</button>
+        </div>
+      </div>
+
+      <div class="wizard-body">
+        <aside class="wizard-steps">
+          <button class="wiz-step-btn active" data-step="1">
+            <span class="wiz-num">1</span>
+            <span class="wiz-step-info">
+              <strong>Python Runtime</strong>
+              <small id="wizBadgePython">Checking...</small>
+            </span>
+          </button>
+          <button class="wiz-step-btn" data-step="2">
+            <span class="wiz-num">2</span>
+            <span class="wiz-step-info">
+              <strong>Packages (requirements.txt)</strong>
+              <small id="wizBadgeDeps">Checking...</small>
+            </span>
+          </button>
+          <button class="wiz-step-btn" data-step="3">
+            <span class="wiz-num">3</span>
+            <span class="wiz-step-info">
+              <strong>Tailscale &amp; Funnel</strong>
+              <small id="wizBadgeTailscale">Checking...</small>
+            </span>
+          </button>
+          <button class="wiz-step-btn" data-step="4">
+            <span class="wiz-num">4</span>
+            <span class="wiz-step-info">
+              <strong>Model &amp; Role Config</strong>
+              <small id="wizBadgeModel">Checking...</small>
+            </span>
+          </button>
+        </aside>
+
+        <div class="wizard-content">
+          <!-- Step 1: Python -->
+          <div class="wiz-pane active" id="wizPane1">
+            <h3>Step 1 — Python 3.11+ Runtime</h3>
+            <p class="wiz-desc">The desktop EXE includes an embedded Python runtime, while source/CLI mode uses your system Python and <code>.venv</code>.</p>
+            <div class="wiz-status-box" id="wizPythonDetails">Checking Python...</div>
+            <div class="wiz-actions">
+              <button class="btn btn-primary" id="wizInstallPythonBtn">Install Python 3.12 (winget)</button>
+              <button class="btn btn-ghost" onclick="setWizardStep(2)">Next: Packages →</button>
+            </div>
+          </div>
+
+          <!-- Step 2: Packages -->
+          <div class="wiz-pane" id="wizPane2">
+            <h3>Step 2 — Install <code>requirements.txt</code></h3>
+            <p class="wiz-desc">Installs <code>torch</code>, <code>transformers</code>, <code>safetensors</code>, <code>pywebview</code>, <code>typer</code>, and <code>rich</code> into <code>.venv</code> for CLI &amp; development use.</p>
+            <div class="wiz-status-box" id="wizDepsDetails">Checking packages...</div>
+            <div class="wiz-actions">
+              <button class="btn btn-primary" id="wizInstallDepsBtn">Create .venv &amp; Install requirements.txt</button>
+              <button class="btn btn-ghost" onclick="setWizardStep(3)">Next: Tailscale →</button>
+            </div>
+          </div>
+
+          <!-- Step 3: Tailscale -->
+          <div class="wiz-pane" id="wizPane3">
+            <h3>Step 3 — Tailscale &amp; Funnel (Global / Kaggle Networking)</h3>
+            <p class="wiz-desc">Install and sign in to Tailscale, then expose port <code>5000</code> with Funnel so Kaggle GPUs &amp; remote friends can connect over HTTPS/WSS port <code>443</code>.</p>
+            <div class="wiz-status-box" id="wizTailscaleDetails">Checking Tailscale...</div>
+            <div class="wiz-actions">
+              <button class="btn btn-accent" id="wizInstallTsBtn">1. Install Tailscale</button>
+              <button class="btn btn-accent" id="wizLoginTsBtn">2. Sign In (tailscale up)</button>
+              <button class="btn btn-primary" id="wizFunnelTsBtn">3. Enable Funnel (:5000)</button>
+              <button class="btn btn-ghost" onclick="setWizardStep(4)">Next: Model &amp; Finish →</button>
+            </div>
+          </div>
+
+          <!-- Step 4: Model & Starter Config -->
+          <div class="wiz-pane" id="wizPane4">
+            <h3>Step 4 — Starter Model &amp; Configuration</h3>
+            <p class="wiz-desc">Download a starter Hugging Face model into <code>models/</code>, choose your role, and set a shared <code>auth_token</code>.</p>
+            <div class="grid-2">
+              <label class="field">
+                <span>Hugging Face Model to Download</span>
+                <input type="text" id="wizModelRepo" value="Qwen/Qwen2.5-0.5B-Instruct" />
+              </label>
+              <label class="field">
+                <span>Active Local Model Folder</span>
+                <select id="wizLocalModels"></select>
+              </label>
+            </div>
+            <div class="grid-2">
+              <label class="field">
+                <span>This Machine's Default Role</span>
+                <select id="wizRole">
+                  <option value="host">Host Mode (coordinates pipeline &amp; chat)</option>
+                  <option value="peer">Peer Mode (worker GPU/CPU)</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Shared Auth Token</span>
+                <div class="input-row">
+                  <input type="text" id="wizAuthToken" />
+                  <button class="btn-xs btn-accent" id="wizGenTokenBtn">Generate</button>
+                </div>
+              </label>
+            </div>
+            <div class="wiz-actions">
+              <button class="btn btn-accent" id="wizDownloadModelBtn">Download Selected Model</button>
+              <button class="btn btn-primary" id="wizFinishBtn">Save &amp; Launch App →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="wiz-console-wrap">
+        <div class="log-toolbar">
+          <span class="muted">Installer Output</span>
+          <button class="btn-xs" id="wizClearLogBtn">Clear</button>
+        </div>
+        <pre class="log-console wiz-console" id="wizConsole"></pre>
+      </div>
+    </div>
+  </section>
 
   <!-- HOST SECTION -->
   <main class="section active" id="hostSection">

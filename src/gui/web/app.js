@@ -254,21 +254,35 @@ window.__onBackendEvent = function ({ event, data }) {
     syncGlobalPill();
   } else if (event === "log_line") {
     appendLog($("hostLogConsole"), data.line);
+  } else if (event === "setup_log") {
+    appendLog($("wizConsole"), data.line);
+  } else if (event === "setup_action_done") {
+    setWizardBusy(false);
+    if (data.setup) renderSetupStatus(data.setup);
+    if (data.ok) {
+      showToast("Setup step completed", "success");
+    } else {
+      showToast(data.error || "Setup step failed", "error");
+    }
   } else if (event === "download_state") {
     if (data.status === "downloading") {
       $("dlProgressRow").classList.remove("hidden");
       $("confirmDlBtn").disabled = true;
       $("dlStatusText").textContent = `Downloading ${data.repo_id} into models/...`;
+      appendLog($("wizConsole"), `Downloading ${data.repo_id} into models/...`);
     } else if (data.status === "done") {
       $("dlProgressRow").classList.add("hidden");
       $("confirmDlBtn").disabled = false;
       $("downloadModal").classList.add("hidden");
       if (data.target_role === "peer") $("peerModel").value = data.path;
       else $("hostModel").value = data.path;
+      appendLog($("wizConsole"), `Model saved to ${data.path}`);
+      window.pywebview.api.get_setup_status().then(renderSetupStatus).catch(() => {});
       showToast(`Model saved to ${data.path}`, "success");
     } else if (data.status === "error") {
       $("dlProgressRow").classList.add("hidden");
       $("confirmDlBtn").disabled = false;
+      appendLog($("wizConsole"), `Download error: ${data.error}`);
       showToast(`Download failed: ${data.error}`, "error");
     }
   }
@@ -530,6 +544,142 @@ function setupBindings() {
       showToast(String(e), "error");
     }
   };
+
+  // Setup Wizard Bindings
+  $("openWizardBtn").onclick = async () => {
+    $("setupWizard").classList.remove("hidden");
+    const st = await window.pywebview.api.get_setup_status();
+    renderSetupStatus(st);
+  };
+  $("wizRefreshBtn").onclick = async () => {
+    const st = await window.pywebview.api.get_setup_status();
+    renderSetupStatus(st);
+    showToast("Environment checks refreshed", "info");
+  };
+  $("wizSkipBtn").onclick = async () => {
+    await window.pywebview.api.complete_setup({});
+    $("setupWizard").classList.add("hidden");
+  };
+  document.querySelectorAll(".wiz-step-btn").forEach((btn) => {
+    btn.onclick = () => setWizardStep(Number(btn.dataset.step));
+  });
+  $("wizClearLogBtn").onclick = () => ($("wizConsole").textContent = "");
+
+  $("wizInstallPythonBtn").onclick = () => runWizardAction("install_python");
+  $("wizInstallDepsBtn").onclick = () => runWizardAction("install_requirements");
+  $("wizInstallTsBtn").onclick = () => runWizardAction("install_tailscale");
+  $("wizLoginTsBtn").onclick = () => runWizardAction("tailscale_login");
+  $("wizFunnelTsBtn").onclick = () =>
+    runWizardAction("tailscale_funnel", { port: Number($("hostListenPort").value || 5000) });
+
+  $("wizDownloadModelBtn").onclick = async () => {
+    try {
+      await window.pywebview.api.download_model($("wizModelRepo").value, "host");
+    } catch (e) {
+      showToast(String(e), "error");
+    }
+  };
+  $("wizGenTokenBtn").onclick = () => {
+    $("wizAuthToken").value = Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2, 8);
+  };
+  $("wizFinishBtn").onclick = async () => {
+    const selectedModel = $("wizLocalModels").value || "";
+    const tsHost = state.lastTailscaleDns || "";
+    const res = await window.pywebview.api.complete_setup({
+      role: $("wizRole").value,
+      model: selectedModel,
+      auth_token: $("wizAuthToken").value.trim(),
+      host_address: tsHost,
+    });
+    if (res.state) {
+      applyHostConfig(res.state.host_config);
+      applyPeerConfig(res.state.peer_config);
+    }
+    $("setupWizard").classList.add("hidden");
+    const targetBtn = res.role === "peer" ? $("modeBtnPeer") : $("modeBtnHost");
+    targetBtn.click();
+    showToast("Setup complete! Ready to run.", "success");
+  };
+}
+
+window.setWizardStep = function (step) {
+  document.querySelectorAll(".wiz-step-btn").forEach((b) => {
+    b.classList.toggle("active", Number(b.dataset.step) === step);
+  });
+  document.querySelectorAll(".wiz-pane").forEach((p, idx) => {
+    p.classList.toggle("active", idx + 1 === step);
+  });
+};
+
+function setWizardBusy(busy) {
+  ["wizInstallPythonBtn", "wizInstallDepsBtn", "wizInstallTsBtn", "wizLoginTsBtn", "wizFunnelTsBtn"].forEach((id) => {
+    $(id).disabled = busy;
+  });
+}
+
+async function runWizardAction(action, payload = {}) {
+  setWizardBusy(true);
+  appendLog($("wizConsole"), `> Running ${action}...`);
+  await window.pywebview.api.run_setup_action(action, payload);
+}
+
+function renderSetupStatus(setup) {
+  const py = setup.python || {};
+  $("wizBadgePython").textContent = py.ok ? "Ready" : "Missing";
+  $("wizPythonDetails").textContent = [
+    `Bundled EXE Runtime : ${py.frozen ? `Yes (Python ${py.bundled_version})` : `Running from source (${py.bundled_version})`}`,
+    `System Python       : ${py.system_python ? `${py.system_python_version} (${py.system_python})` : "Not found in PATH"}`,
+    `Local .venv         : ${py.venv_exists ? `Found (${py.venv_python})` : "Not created yet"}`,
+  ].join("\n");
+
+  const deps = setup.dependencies || {};
+  $("wizBadgeDeps").textContent = deps.ok ? "All Installed" : `Missing ${deps.missing.length}`;
+  const verPairs = Object.entries(deps.versions || {}).map(([k, v]) => `${k}==${v}`).join(", ");
+  $("wizDepsDetails").textContent = [
+    `Runtime Dependencies: ${deps.ok ? "All core packages ready" : `Missing: ${deps.missing.join(", ")}`}`,
+    `Loaded Versions     : ${verPairs || "-"}`,
+    `requirements.txt    : ${deps.requirements_exists ? "Present in workspace" : "Not in current directory"}`,
+  ].join("\n");
+
+  const ts = setup.tailscale || {};
+  state.lastTailscaleDns = ts.dns_name || "";
+  if (!ts.installed) {
+    $("wizBadgeTailscale").textContent = "Not Installed";
+  } else if (!ts.logged_in) {
+    $("wizBadgeTailscale").textContent = "Sign-In Needed";
+  } else if (ts.funnel_active) {
+    $("wizBadgeTailscale").textContent = "Funnel Active";
+  } else {
+    $("wizBadgeTailscale").textContent = "Connected";
+  }
+  $("wizTailscaleDetails").textContent = [
+    `Installed    : ${ts.installed ? `Yes (${ts.exe})` : "No"}`,
+    `Status       : ${ts.backend_state || "Unknown"}`,
+    `MagicDNS Host: ${ts.dns_name || "-"} (copy this into peer.yaml host_address!)`,
+    `Tailscale IP : ${ts.ip || "-"}`,
+    `Funnel :5000 : ${ts.funnel_active ? "Active (Port 443 ready for Kaggle & WAN)" : "Not enabled yet"}`,
+  ].join("\n");
+
+  const models = setup.models || [];
+  $("wizBadgeModel").textContent = models.length > 0 ? `${models.length} model(s)` : "No model yet";
+  const sel = $("wizLocalModels");
+  sel.innerHTML = "";
+  if (models.length === 0) {
+    const opt = document.createElement("option");
+    opt.value = "";
+    opt.textContent = "(None downloaded yet — click Download)";
+    sel.appendChild(opt);
+  } else {
+    models.forEach((m) => {
+      const opt = document.createElement("option");
+      opt.value = m;
+      opt.textContent = m;
+      sel.appendChild(opt);
+    });
+  }
+  if (!$("wizAuthToken").value && setup.suggested_token) {
+    $("wizAuthToken").value = $("hostAuthToken").value || setup.suggested_token;
+  }
 }
 
 window.addEventListener("pywebviewready", async () => {
@@ -544,6 +694,12 @@ window.addEventListener("pywebviewready", async () => {
       $("peerHwName").textContent = init.hardware.name;
       $("peerHwType").textContent = (init.hardware.type || "cpu").toUpperCase();
       $("peerHwMem").textContent = init.hardware.free_mem;
+    }
+    if (init.setup) {
+      renderSetupStatus(init.setup);
+      if (!init.setup.setup_complete) {
+        $("setupWizard").classList.remove("hidden");
+      }
     }
   } catch (e) {
     showToast(`Failed loading initial state: ${e}`, "error");
