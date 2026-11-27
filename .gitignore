@@ -6,6 +6,8 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+build/
+dist/
 
 # Local configs (contain machine-specific LAN IPs and ports)
 config/host.yaml

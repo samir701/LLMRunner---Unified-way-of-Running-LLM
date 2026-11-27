@@ -13,9 +13,17 @@ from src.common.logging_setup import setup_logging
 
 app = typer.Typer(
     name="llmrun",
-    help="Local LLM Runner V1 - split an LLM by layers across machines on your LAN.",
+    help="Local LLM Runner V2 - split an LLM by layers across LAN and global machines.",
     no_args_is_help=True,
 )
+
+
+@app.command()
+def ui() -> None:
+    """Launch the V2 Desktop Application (Host + Peer in one window)."""
+    from src.gui.app import main as launch_gui
+
+    launch_gui()
 
 
 @app.command()

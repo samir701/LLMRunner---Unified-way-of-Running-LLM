@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+import threading
 import time
 import uuid
 from typing import Any, Iterator
@@ -252,7 +253,11 @@ class ChatSession:
             generated_ids=generated_ids,
         )
 
-    def generate(self, prompt: str) -> Iterator[str]:
+    def generate(
+        self,
+        prompt: str,
+        cancel_event: threading.Event | None = None,
+    ) -> Iterator[str]:
         """Tokenize prompt, stream tokens across the pipeline, and record conversation turn."""
         session_id = uuid.uuid4().hex[:12]
         self.engine.clear_session(session_id)
@@ -292,6 +297,8 @@ class ChatSession:
             token_pos += input_ids.shape[1]
 
             for _ in range(self.gen_config.max_tokens):
+                if cancel_event is not None and cancel_event.is_set():
+                    break
                 steps += 1
                 total_host_ms += h_ms
                 p_ms = reply.header.get("peer_ms")

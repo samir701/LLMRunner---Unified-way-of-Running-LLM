@@ -8,7 +8,7 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Iterator
+from typing import Callable, Iterator
 
 from src.common.config import HostConfig, PeerTarget
 from src.common.messages import (
@@ -200,6 +200,8 @@ class Coordinator:
     def _accept_inbound_peers(
         self,
         inbound_targets: list[PeerTarget],
+        on_status: Callable[[str], None] | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> dict[str, ConnectedPeer]:
         """Listen on `config.listen_port` until all configured inbound peers register."""
         expected = {t.name: t for t in inbound_targets}
@@ -207,6 +209,10 @@ class Coordinator:
         listener: Listener = listen("0.0.0.0", self.config.listen_port)
         deadline = time.monotonic() + self.config.peer_wait_timeout
 
+        if on_status:
+            on_status(
+                f"Listening on :{self.config.listen_port} for inbound peer(s): {', '.join(expected.keys())}"
+            )
         logger.info(
             "Listening on 0.0.0.0:%d for %d inbound peer(s): %s",
             self.config.listen_port,
@@ -216,6 +222,8 @@ class Coordinator:
 
         try:
             while len(registered) < len(expected):
+                if cancel_event is not None and cancel_event.is_set():
+                    raise RuntimeError("Startup cancelled by user.")
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     missing = [n for n in expected if n not in registered]
@@ -288,6 +296,12 @@ class Coordinator:
                         addr[1],
                         registered[peer_name].device_type,
                     )
+                    if on_status:
+                        still_waiting = [n for n in expected if n not in registered]
+                        if still_waiting:
+                            on_status(f"Registered '{peer_name}'. Waiting for: {', '.join(still_waiting)}")
+                        else:
+                            on_status(f"Registered '{peer_name}'. All inbound peers connected.")
                 except (TransportError, ValueError) as exc:
                     logger.info("Ignoring non-peer inbound probe from %s:%d: %s", addr[0], addr[1], exc)
                     conn.close()
@@ -304,8 +318,14 @@ class Coordinator:
 
         return registered
 
-    def startup(self) -> None:
+    def startup(
+        self,
+        on_status: Callable[[str], None] | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> None:
         """Discover all outbound and inbound peers, assign layer ranges, and load shards."""
+        if on_status:
+            on_status("Reading model config...")
         model_cfg = read_model_config(self.config.model)
         self.total_layers = get_num_layers(model_cfg)
 
@@ -331,9 +351,17 @@ class Coordinator:
 
         try:
             if inbound_targets:
-                inbound_map = self._accept_inbound_peers(inbound_targets)
+                inbound_map = self._accept_inbound_peers(
+                    inbound_targets,
+                    on_status=on_status,
+                    cancel_event=cancel_event,
+                )
 
             for target in outbound_targets:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise RuntimeError("Startup cancelled by user.")
+                if on_status:
+                    on_status(f"Connecting to outbound peer '{target.name}' ({target.address}:{target.port})...")
                 try:
                     outbound_map[target.name] = self._connect_outbound_peer(target)
                 except Exception as exc:
@@ -407,6 +435,8 @@ class Coordinator:
             )
 
         # Load the host's own first shard while peers load theirs.
+        if on_status:
+            on_status(f"Loading host shard (layers {self.host_range})...")
         self.host_shard = load_model_shard(
             model_dir=self.config.model,
             layer_range=self.host_range,
@@ -417,6 +447,8 @@ class Coordinator:
 
         # Wait for READY from every peer.
         for peer in self.peers:
+            if on_status:
+                on_status(f"Waiting for '{peer.target.name}' to load layers {peer.layer_range}...")
             peer.conn.settimeout(300.0)
             reply = peer.conn.recv_message()
             if reply.msg_type == MessageType.ERROR:
@@ -429,8 +461,12 @@ class Coordinator:
             peer.conn.settimeout(120.0)
             logger.info("Peer '%s' READY with layers %s", peer.target.name, peer.layer_range)
 
+        if on_status:
+            on_status("Measuring peer RTTs...")
         self.measure_rtts()
         self.start_heartbeat()
+        if on_status:
+            on_status("Pipeline READY")
 
     def measure_rtts(self, samples: int = 3) -> None:
         """Measure baseline PING/PONG round-trip latency (ms) to each peer."""

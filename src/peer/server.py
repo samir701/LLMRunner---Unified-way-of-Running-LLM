@@ -6,6 +6,7 @@ import hmac
 import logging
 import threading
 import time
+from typing import Callable
 
 from rich.console import Console
 
@@ -105,12 +106,19 @@ def _serve_upstream_activations(
             upstream_conn.close()
 
 
+def _emit(on_status: Callable[[str, str], None] | None, state: str, detail: str) -> None:
+    if on_status is not None:
+        on_status(state, detail)
+
+
 def _run_session(
     config: PeerConfig,
     device,
     host_conn: TCPConnection,
     listener: Listener | None,
     console: Console,
+    on_status: Callable[[str, str], None] | None = None,
+    external_stop: threading.Event | None = None,
 ) -> None:
     """Run one host session over an established `host_conn`."""
     next_conn: TCPConnection | None = None
@@ -120,6 +128,7 @@ def _run_session(
 
     try:
         host_conn.settimeout(30.0)
+        _emit(on_status, "HANDSHAKE", "Waiting for HELLO from host...")
 
         # 1. HELLO -> INFO
         hello = host_conn.recv_message()
@@ -163,6 +172,11 @@ def _run_session(
         next_port = assign.header.get("next_port")
         layer_range = LayerRange(layer_start, layer_end)
 
+        assign_desc = (
+            f"Layers {layer_range} ({'last' if is_last else 'middle'}, "
+            f"{'host-relay' if relay_via_host else 'direct'})"
+        )
+        _emit(on_status, "LOADING_SHARD", f"{assign_desc}. Loading weights...")
         console.print(
             f"Assigned layers [green]{layer_range}[/green] "
             f"({'last' if is_last else 'middle'}, "
@@ -209,12 +223,17 @@ def _run_session(
             upstream_thread.start()
 
         host_conn.send_message(ready_msg(config.name, layer_start, layer_end))
+        _emit(on_status, "READY", f"Serving layers {layer_range} on {device_name}")
         console.print(f"[bold green]READY[/bold green] (layers {layer_range}).")
 
         # 3. Serve control messages (PING/STOP) and ACTIVATE.
-        host_conn.settimeout(None)
-        while True:
-            msg = host_conn.recv_message()
+        host_conn.settimeout(1.0)
+        while external_stop is None or not external_stop.is_set():
+            try:
+                msg = host_conn.recv_message()
+            except TransportTimeoutError:
+                continue
+
             if msg.msg_type == MessageType.ACTIVATE:
                 worker.process_activate(msg)
             elif msg.msg_type == MessageType.PING:
@@ -222,6 +241,7 @@ def _run_session(
                     pong_msg(config.name, float(msg.header.get("ts", 0.0)))
                 )
             elif msg.msg_type == MessageType.STOP:
+                _emit(on_status, "STOPPED", "Received STOP from host. Clearing KV caches.")
                 console.print("[dim]Received STOP. Clearing caches...[/dim]")
                 break
             else:
@@ -237,18 +257,30 @@ def _run_session(
         host_conn.close()
 
 
-def run_peer_server(config: PeerConfig) -> None:
+def run_peer_server(
+    config: PeerConfig,
+    on_status: Callable[[str, str], None] | None = None,
+    external_stop: threading.Event | None = None,
+) -> None:
     """Run peer in either outbound-to-host mode (for NAT/Kaggle/WAN) or LAN listen mode."""
     console = Console()
     device = resolve_device(config.device)
 
+    def stopped() -> bool:
+        return external_stop is not None and external_stop.is_set()
+
     if config.host_address and config.host_port:
+        _emit(
+            on_status,
+            "CONNECTING",
+            f"Connecting to {config.host_address}:{config.host_port} ({config.host_transport})",
+        )
         console.print(
             f"[bold cyan]Peer '{config.name}'[/bold cyan] connecting to host "
             f"[green]{config.host_address}:{config.host_port}[/green] (device: {device})"
         )
         try:
-            while True:
+            while not stopped():
                 try:
                     host_conn = connect(
                         config.host_address,
@@ -265,41 +297,75 @@ def run_peer_server(config: PeerConfig) -> None:
                             auth_token=config.auth_token,
                         )
                     )
-                    _run_session(config, device, host_conn, listener=None, console=console)
+                    _run_session(
+                        config,
+                        device,
+                        host_conn,
+                        listener=None,
+                        console=console,
+                        on_status=on_status,
+                        external_stop=external_stop,
+                    )
                 except ConnectionClosedError:
-                    console.print("[yellow]Host disconnected. Reconnecting in 3s...[/yellow]")
+                    if not stopped():
+                        _emit(on_status, "RECONNECTING", "Host disconnected. Retrying in 3s...")
+                        console.print("[yellow]Host disconnected. Reconnecting in 3s...[/yellow]")
                 except Exception as exc:
-                    console.print(f"[yellow]Waiting for host ({exc}). Retrying in 3s...[/yellow]")
-                time.sleep(3.0)
+                    if not stopped():
+                        _emit(on_status, "WAITING", f"Waiting for host ({exc}). Retrying in 3s...")
+                        console.print(f"[yellow]Waiting for host ({exc}). Retrying in 3s...[/yellow]")
+                if external_stop is not None:
+                    if external_stop.wait(3.0):
+                        break
+                else:
+                    time.sleep(3.0)
         except KeyboardInterrupt:
             console.print("\n[yellow]Peer stopped by user.[/yellow]")
+        _emit(on_status, "STOPPED", "Peer stopped.")
         return
 
     # Classic LAN listen mode.
     listener = listen("0.0.0.0", config.listen_port)
+    _emit(on_status, "LISTENING", f"Listening on 0.0.0.0:{config.listen_port} (device: {device})")
     console.print(
         f"[bold cyan]Peer '{config.name}'[/bold cyan] listening on port "
         f"[green]{config.listen_port}[/green] (device: {device})"
     )
 
     try:
-        while True:
+        while not stopped():
             try:
-                while True:
+                host_conn = None
+                while not stopped():
                     try:
                         host_conn, addr = listener.accept(timeout=1.0)
                         break
                     except TransportTimeoutError:
                         continue
+                if host_conn is None:
+                    break
 
                 logger.info("Host connected from %s:%d", addr[0], addr[1])
-                _run_session(config, device, host_conn, listener=listener, console=console)
+                _run_session(
+                    config,
+                    device,
+                    host_conn,
+                    listener=listener,
+                    console=console,
+                    on_status=on_status,
+                    external_stop=external_stop,
+                )
             except ConnectionClosedError:
-                console.print("[yellow]Host disconnected. Returning to listening state...[/yellow]")
+                if not stopped():
+                    _emit(on_status, "LISTENING", "Host disconnected. Listening again...")
+                    console.print("[yellow]Host disconnected. Returning to listening state...[/yellow]")
             except Exception as exc:
-                console.print(f"[red]Session error: {exc}[/red]")
-                logger.exception("Peer session error")
+                if not stopped():
+                    _emit(on_status, "ERROR", str(exc))
+                    console.print(f"[red]Session error: {exc}[/red]")
+                    logger.exception("Peer session error")
     except KeyboardInterrupt:
         console.print("\n[yellow]Peer stopped by user.[/yellow]")
     finally:
         listener.close()
+        _emit(on_status, "STOPPED", "Peer stopped.")

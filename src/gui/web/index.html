@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Local LLM Runner V2</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="ambient-glow"></div>
+
+  <!-- Top App Bar -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+          <path d="M2 17l10 5 10-5"></path>
+          <path d="M2 12l10 5 10-5"></path>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-title">Local LLM Runner <span class="version-pill">V2</span></div>
+        <div class="brand-sub">Distributed Layer Pipeline • LAN &amp; Global WAN</div>
+      </div>
+    </div>
+
+    <div class="mode-switcher" role="tablist">
+      <button class="mode-btn active" data-mode="host" id="modeBtnHost">
+        <span class="mode-dot"></span> Host Mode
+      </button>
+      <button class="mode-btn" data-mode="peer" id="modeBtnPeer">
+        <span class="mode-dot"></span> Peer Mode
+      </button>
+    </div>
+
+    <div class="topbar-right">
+      <span class="compat-badge" title="100% protocol compatible with V1/V2 CLI & Kaggle peers">CLI-Compatible</span>
+      <div class="status-pill" id="globalStatusPill" data-state="IDLE">
+        <span class="pulse-dot"></span>
+        <span id="globalStatusText">IDLE</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- HOST SECTION -->
+  <main class="section active" id="hostSection">
+    <aside class="sidebar">
+      <div class="card">
+        <div class="card-header">
+          <span>Configuration</span>
+          <div class="btn-group">
+            <button class="btn-xs" id="hostBrowseYamlBtn">Browse</button>
+            <button class="btn-xs" id="hostLoadYamlBtn">Load</button>
+            <button class="btn-xs btn-accent" id="hostSaveYamlBtn">Save</button>
+          </div>
+        </div>
+        <label class="field">
+          <span>Host YAML Path</span>
+          <input type="text" id="hostCfgPath" value="config/host.yaml" />
+        </label>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span>Model &amp; Network</span>
+          <button class="btn-xs btn-accent" id="hostDownloadBtn">+ Download HF</button>
+        </div>
+        <label class="field">
+          <span>Model Folder</span>
+          <div class="input-row">
+            <input type="text" id="hostModel" placeholder="models/Qwen2.5-0.5B-Instruct" />
+            <button class="btn-xs" id="hostBrowseModelBtn">...</button>
+          </div>
+        </label>
+        <div class="grid-2">
+          <label class="field">
+            <span>Listen Port</span>
+            <input type="number" id="hostListenPort" value="5000" />
+          </label>
+          <label class="field">
+            <span>Wait Timeout (s)</span>
+            <input type="number" id="hostWaitTimeout" value="300" />
+          </label>
+        </div>
+        <div class="grid-2">
+          <label class="field">
+            <span>Routing</span>
+            <select id="hostRouting">
+              <option value="auto">auto (smart)</option>
+              <option value="direct">direct (LAN)</option>
+              <option value="host_relay">host_relay (WAN)</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Auth Token</span>
+            <input type="text" id="hostAuthToken" placeholder="shared secret" />
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span>Pipeline Peers</span>
+          <button class="btn-xs btn-accent" id="openAddPeerBtn">+ Add Peer</button>
+        </div>
+        <div class="peer-list" id="hostPeersList"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span>Generation Tuning</span>
+        </div>
+        <div class="grid-2">
+          <label class="field">
+            <span>Max Tokens</span>
+            <input type="number" id="genMaxTokens" value="512" />
+          </label>
+          <label class="field">
+            <span>Temperature</span>
+            <input type="number" step="0.05" id="genTemp" value="0.5" />
+          </label>
+          <label class="field">
+            <span>Top-P</span>
+            <input type="number" step="0.05" id="genTopP" value="0.9" />
+          </label>
+          <label class="field">
+            <span>Top-K</span>
+            <input type="number" id="genTopK" value="40" />
+          </label>
+          <label class="field">
+            <span>Rep. Penalty</span>
+            <input type="number" step="0.05" id="genRepPen" value="1.1" />
+          </label>
+          <label class="field">
+            <span>History Turns</span>
+            <input type="number" id="genHistory" value="6" />
+          </label>
+        </div>
+        <label class="field">
+          <span>System Prompt</span>
+          <textarea id="genSystemPrompt" rows="3"></textarea>
+        </label>
+      </div>
+    </aside>
+
+    <section class="workspace">
+      <div class="action-bar">
+        <div class="action-status">
+          <div class="status-pill" id="hostStatePill" data-state="IDLE">
+            <span class="pulse-dot"></span>
+            <span id="hostStateBadge">IDLE</span>
+          </div>
+          <span class="status-detail" id="hostStateDetail">Configure your model &amp; peers, then start the pipeline.</span>
+        </div>
+
+        <div class="action-buttons">
+          <button class="btn btn-ghost" id="probePeersBtn">Check Status</button>
+          <button class="btn btn-primary" id="startHostBtn">Start Host</button>
+          <button class="btn btn-danger hidden" id="stopHostBtn">Stop Host</button>
+        </div>
+      </div>
+
+      <div class="subtabs">
+        <button class="subtab active" data-subtab="chat">Chat</button>
+        <button class="subtab" data-subtab="pipeline">Pipeline Topology</button>
+        <button class="subtab" data-subtab="logs">Logs</button>
+      </div>
+
+      <!-- Chat Subview -->
+      <div class="subview active" id="subview-chat">
+        <div class="chat-scroll" id="chatMessages">
+          <div class="chat-empty" id="chatEmptyState">
+            <div class="empty-icon">⚡</div>
+            <h3>Distributed LLM Ready to Launch</h3>
+            <p>Start the host pipeline to split layers across your local &amp; global devices, then ask anything.</p>
+            <div class="starter-chips">
+              <button class="chip" data-prompt="Full form of API?">Full form of API?</button>
+              <button class="chip" data-prompt="Explain pipeline parallelism in 2 lines.">Explain pipeline parallelism</button>
+              <button class="chip" data-prompt="Write a Python function to check if a number is prime.">Python prime check</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="composer">
+          <textarea id="promptInput" rows="2" placeholder="Ask anything... (Enter to send, Shift+Enter for new line)"></textarea>
+          <div class="composer-actions">
+            <button class="btn btn-ghost btn-sm" id="clearChatBtn" title="Clear conversation & KV caches">Clear</button>
+            <button class="btn btn-warn btn-sm hidden" id="stopGenBtn">Stop</button>
+            <button class="btn btn-primary btn-sm" id="sendPromptBtn" disabled>Send</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pipeline Subview -->
+      <div class="subview" id="subview-pipeline">
+        <div class="pipeline-wrap">
+          <div class="section-label">Live Layer Pipeline <span id="pipelineSummaryMeta" class="muted"></span></div>
+          <div class="topology-flow" id="topologyFlow">
+            <div class="empty-box">Start Host to view live node sharding, VRAM allocation, and RTT latency.</div>
+          </div>
+
+          <div class="section-label" style="margin-top: 20px;">Peer Probe Status</div>
+          <div class="probe-grid" id="probeResults">
+            <div class="empty-box">Click <strong>Check Status</strong> to test configured peers.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Logs Subview -->
+      <div class="subview" id="subview-logs">
+        <div class="log-toolbar">
+          <span class="muted">Live System &amp; Transport Logs</span>
+          <button class="btn-xs" id="clearLogsBtn">Clear</button>
+        </div>
+        <pre class="log-console" id="hostLogConsole"></pre>
+      </div>
+    </section>
+  </main>
+
+  <!-- PEER SECTION -->
+  <main class="section" id="peerSection">
+    <aside class="sidebar">
+      <div class="card">
+        <div class="card-header">
+          <span>Peer Configuration</span>
+          <div class="btn-group">
+            <button class="btn-xs" id="peerBrowseYamlBtn">Browse</button>
+            <button class="btn-xs" id="peerLoadYamlBtn">Load</button>
+            <button class="btn-xs btn-accent" id="peerSaveYamlBtn">Save</button>
+          </div>
+        </div>
+        <label class="field">
+          <span>Peer YAML Path</span>
+          <input type="text" id="peerCfgPath" value="config/peer.yaml" />
+        </label>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span>Identity &amp; Model</span>
+          <button class="btn-xs btn-accent" id="peerDownloadBtn">+ Download HF</button>
+        </div>
+        <label class="field">
+          <span>Peer Name</span>
+          <input type="text" id="peerName" value="peer-1" />
+        </label>
+        <label class="field">
+          <span>Model Folder</span>
+          <div class="input-row">
+            <input type="text" id="peerModel" placeholder="models/Qwen2.5-0.5B-Instruct" />
+            <button class="btn-xs" id="peerBrowseModelBtn">...</button>
+          </div>
+        </label>
+        <div class="grid-2">
+          <label class="field">
+            <span>Compute Device</span>
+            <select id="peerDevice">
+              <option value="auto">auto (GPU if avail)</option>
+              <option value="cuda">cuda (GPU)</option>
+              <option value="cpu">cpu</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Auth Token</span>
+            <input type="text" id="peerAuthToken" placeholder="shared secret" />
+          </label>
+        </div>
+        <div class="grid-2">
+          <label class="field">
+            <span>Fixed Start (opt)</span>
+            <input type="number" id="peerLayerStart" placeholder="auto" />
+          </label>
+          <label class="field">
+            <span>Fixed End (opt)</span>
+            <input type="number" id="peerLayerEnd" placeholder="auto" />
+          </label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <span>Connection Mode</span>
+        </div>
+        <div class="segmented-small">
+          <button class="seg-btn active" data-conn="wan" id="peerConnWanBtn">Global / WAN Connect</button>
+          <button class="seg-btn" data-conn="lan" id="peerConnLanBtn">LAN Listen</button>
+        </div>
+
+        <div id="peerWanFields">
+          <label class="field">
+            <span>Host Address</span>
+            <input type="text" id="peerHostAddr" placeholder="e.g. host.ts.net or 192.168.1.10" />
+          </label>
+          <div class="grid-2">
+            <label class="field">
+              <span>Host Port</span>
+              <input type="number" id="peerHostPort" value="443" />
+            </label>
+            <label class="field">
+              <span>Transport</span>
+              <select id="peerTransport">
+                <option value="wss">wss (Port 443 TLS)</option>
+                <option value="ws">ws (WebSocket)</option>
+                <option value="tcp">tcp (Raw LAN)</option>
+              </select>
+            </label>
+          </div>
+          <label class="field">
+            <span>SOCKS5 Proxy (optional)</span>
+            <input type="text" id="peerSocks5" placeholder="127.0.0.1:1055" />
+          </label>
+        </div>
+
+        <div id="peerLanFields" class="hidden">
+          <label class="field">
+            <span>Listen Port</span>
+            <input type="number" id="peerListenPort" value="5001" />
+          </label>
+        </div>
+      </div>
+    </aside>
+
+    <section class="workspace">
+      <div class="action-bar">
+        <div class="action-status">
+          <div class="status-pill" id="peerStatePill" data-state="IDLE">
+            <span class="pulse-dot"></span>
+            <span id="peerStateBadge">IDLE</span>
+          </div>
+          <span class="status-detail" id="peerStateDetail">Configure connection mode and click Start Peer.</span>
+        </div>
+
+        <div class="action-buttons">
+          <button class="btn btn-primary" id="startPeerBtn">Start Peer</button>
+          <button class="btn btn-danger hidden" id="stopPeerBtn">Stop Peer</button>
+        </div>
+      </div>
+
+      <div class="peer-monitor">
+        <div class="telemetry-cards">
+          <div class="stat-card">
+            <div class="stat-label">Local Compute</div>
+            <div class="stat-value" id="peerHwName">Detecting...</div>
+            <div class="stat-sub" id="peerHwType">-</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Available Memory</div>
+            <div class="stat-value" id="peerHwMem">-</div>
+            <div class="stat-sub">Reported to Host during handshake</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Assigned Shard</div>
+            <div class="stat-value" id="peerShardRange">Waiting</div>
+            <div class="stat-sub" id="peerShardSub">Host assigns layers dynamically</div>
+          </div>
+        </div>
+
+        <div class="log-panel-card">
+          <div class="log-toolbar">
+            <span class="muted">Peer Activity &amp; Protocol Log</span>
+            <button class="btn-xs" id="clearPeerLogsBtn">Clear</button>
+          </div>
+          <pre class="log-console" id="peerLogConsole"></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Add Peer Modal -->
+  <div class="modal-backdrop hidden" id="addPeerModal">
+    <div class="modal">
+      <div class="modal-title">Add Pipeline Peer</div>
+      <label class="field">
+        <span>Peer Name</span>
+        <input type="text" id="newPeerName" placeholder="e.g. kaggle-1 or local-laptop" />
+      </label>
+      <label class="field">
+        <span>Connection Mode</span>
+        <select id="newPeerMode">
+          <option value="inbound">inbound (Peer connects to Host — Kaggle / NAT / Tailscale)</option>
+          <option value="outbound">outbound (Host connects to Peer — Local LAN)</option>
+        </select>
+      </label>
+      <div id="newPeerOutboundFields" class="hidden">
+        <div class="grid-2">
+          <label class="field">
+            <span>Peer LAN IP / Host</span>
+            <input type="text" id="newPeerAddr" value="192.168.1.21" />
+          </label>
+          <label class="field">
+            <span>Peer Port</span>
+            <input type="number" id="newPeerPort" value="5001" />
+          </label>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="cancelAddPeerBtn">Cancel</button>
+        <button class="btn btn-primary" id="confirmAddPeerBtn">Add Peer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Download Model Modal -->
+  <div class="modal-backdrop hidden" id="downloadModal">
+    <div class="modal">
+      <div class="modal-title">Download Hugging Face Model</div>
+      <label class="field">
+        <span>Hugging Face Repo ID</span>
+        <input type="text" id="dlRepoId" value="Qwen/Qwen2.5-0.5B-Instruct" />
+      </label>
+      <div class="dl-status hidden" id="dlProgressRow">
+        <div class="spinner"></div>
+        <span id="dlStatusText">Downloading weights into models/...</span>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="cancelDlBtn">Cancel</button>
+        <button class="btn btn-primary" id="confirmDlBtn">Download</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

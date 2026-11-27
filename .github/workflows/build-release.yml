@@ -1,0 +1,45 @@
+name: Build Windows EXE & Linux DEB
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies & PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install "pyinstaller>=6.0"
+          pip install -e . --no-deps
+      - name: Build LocalLLMRunner.exe
+        run: pyinstaller --clean --noconfirm packaging/LocalLLMRunner.spec
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LocalLLMRunner-windows-amd64
+          path: dist/LocalLLMRunner.exe
+
+  build-linux-deb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build .deb package
+        run: |
+          python packaging/build_deb.py
+          dpkg-deb --info dist/local-llm-runner_*.deb
+          dpkg-deb --contents dist/local-llm-runner_*.deb | head -n 40
+      - uses: actions/upload-artifact@v4
+        with:
+          name: local-llm-runner-linux-deb
+          path: dist/local-llm-runner_*.deb
