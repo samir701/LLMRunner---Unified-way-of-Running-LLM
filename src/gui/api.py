@@ -469,6 +469,10 @@ class DesktopAPI:
         if self._host_running:
             return {"ok": False, "error": "Host is already running."}
         cfg = build_host_config_from_dict(data)
+        if not Path(cfg.model).exists():
+            raise FileNotFoundError(
+                f"Model folder '{cfg.model}' not found. Click '+ Download HF' or '...' to choose a downloaded model."
+            )
 
         self._host_running = True
         self._startup_cancel.clear()
@@ -563,7 +567,7 @@ class DesktopAPI:
                 self.stop_host()
                 break
 
-    def stop_host(self) -> dict[str, Any]:
+    def stop_host(self, silent: bool = False) -> dict[str, Any]:
         self._startup_cancel.set()
         self._gen_cancel.set()
         self._health_stop.set()
@@ -583,7 +587,8 @@ class DesktopAPI:
         if coord is not None or sess is not None:
             threading.Thread(target=cleanup, daemon=True).start()
 
-        self._emit("host_status", {"state": "STOPPED", "detail": "Host session stopped."})
+        if not silent:
+            self._emit("host_status", {"state": "STOPPED", "detail": "Host session stopped."})
         return {"ok": True}
 
     def send_prompt(self, prompt: str) -> dict[str, Any]:
@@ -654,6 +659,10 @@ class DesktopAPI:
         if self._peer_running:
             return {"ok": False, "error": "Peer is already running."}
         cfg = build_peer_config_from_dict(data)
+        if not Path(cfg.model).exists():
+            raise FileNotFoundError(
+                f"Model folder '{cfg.model}' not found. Click '+ Download HF' or '...' to choose a downloaded model."
+            )
 
         self._peer_running = True
         self._peer_stop.clear()
@@ -679,6 +688,10 @@ class DesktopAPI:
         self._peer_running = False
         return {"ok": True}
 
-    def shutdown(self) -> None:
-        self.stop_host()
+    def shutdown(self, silent: bool = True) -> None:
+        if silent:
+            # Detach window/callbacks first so closing never deadlocks on evaluate_js.
+            self._window = None
+            self._on_event = None
+        self.stop_host(silent=silent)
         self.stop_peer()

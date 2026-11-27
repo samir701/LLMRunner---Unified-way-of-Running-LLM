@@ -59,9 +59,12 @@ def test_webview_window_loads_frontend_and_js_bridge() -> None:
 
     import webview
 
+    from src.gui.app import _resolve_web_index
+
+    assert _resolve_web_index().exists()
+
     api = DesktopAPI()
-    html_path = Path(__file__).resolve().parent.parent / "src" / "gui" / "web" / "index.html"
-    assert html_path.exists()
+    html_path = _resolve_web_index()
 
     win = webview.create_window(
         "Smoke Test",
@@ -78,6 +81,7 @@ def test_webview_window_loads_frontend_and_js_bridge() -> None:
         result["has_peer"] = win.evaluate_js("Boolean(document.getElementById('peerSection'))")
         win.destroy()
 
+    win.events.closing += lambda: api.shutdown(silent=True)
     webview.start(verify_and_close)
     assert result["title"] == "Local LLM Runner V2"
     assert result["has_host"] is True
