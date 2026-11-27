@@ -74,6 +74,7 @@ class PeerConfig:
     host_port: int | None = None
     host_transport: str = "tcp"  # "tcp", "ws", or "wss" (for port 443 / Cloudflare Tunnel)
     auth_token: str | None = None
+    socks5_proxy: str | None = None  # Optional "host:port", e.g. "127.0.0.1:1055" for Tailscale userspace
 
 
 def _read_yaml(path: str | Path) -> dict[str, Any]:
@@ -226,6 +227,12 @@ def load_peer_config(path: str | Path) -> PeerConfig:
     if auth_token is not None:
         auth_token = str(auth_token)
 
+    socks5_proxy = data.get("socks5_proxy")
+    if socks5_proxy is not None:
+        socks5_proxy = str(socks5_proxy).strip() or None
+        if socks5_proxy is not None and ":" not in socks5_proxy:
+            raise ValueError("socks5_proxy must be in 'host:port' format (e.g. '127.0.0.1:1055').")
+
     return PeerConfig(
         name=name,
         listen_port=listen_port,
@@ -236,4 +243,5 @@ def load_peer_config(path: str | Path) -> PeerConfig:
         host_port=int(host_port) if host_port is not None else None,
         host_transport=host_transport,
         auth_token=auth_token,
+        socks5_proxy=socks5_proxy,
     )

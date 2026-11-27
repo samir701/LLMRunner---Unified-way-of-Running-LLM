@@ -5,7 +5,15 @@ device: "auto"                   # auto = GPU if available, else CPU
 # layers: [10, 20]               # optional - 0-based inclusive [start, end]; if omitted, host assigns it
 
 # --- For Global / WAN / Kaggle / NAT peers (connect outbound to host) ---
-# host_address: "example.trycloudflare.com" # Host's tunnel/public hostname
-# host_port: 443                            # Use 443 with host_transport: "wss" for Kaggle
-# host_transport: "wss"                     # "tcp" (default) or "wss" (WebSocket over port 443)
+# Option A: Tailscale Funnel / Cloudflare Tunnel (WSS over port 443):
+# host_address: "my-pc.tailnet-xxxx.ts.net" # Host's Funnel or Cloudflare hostname
+# host_port: 443
+# host_transport: "wss"
+#
+# Option B (Fastest over Tailscale!): Direct Tailnet TCP (no TLS/WSS/Funnel relay):
+# host_address: "100.x.y.z"                 # Host's Tailscale IP or MagicDNS name
+# host_port: 5000                           # Host's listen_port
+# host_transport: "tcp"
+# socks5_proxy: "127.0.0.1:1055"            # Required on Kaggle/Docker with tailscaled --tun=userspace-networking --socks5-server=127.0.0.1:1055
+#
 # auth_token: "my-secret-token"             # Must match host.yaml if set

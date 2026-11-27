@@ -55,6 +55,7 @@ class ConnectedPeer:
     device_name: str = ""
     layer_range: LayerRange | None = None
     is_last: bool = False
+    rtt_ms: float = 0.0
 
 
 @dataclass
@@ -428,7 +429,29 @@ class Coordinator:
             peer.conn.settimeout(120.0)
             logger.info("Peer '%s' READY with layers %s", peer.target.name, peer.layer_range)
 
+        self.measure_rtts()
         self.start_heartbeat()
+
+    def measure_rtts(self, samples: int = 3) -> None:
+        """Measure baseline PING/PONG round-trip latency (ms) to each peer."""
+        for peer in self.peers:
+            rtts: list[float] = []
+            for _ in range(samples):
+                t0 = time.perf_counter()
+                peer.conn.send_message(ping_msg(time.time()))
+                reply = peer.conn.recv_message()
+                if reply.msg_type != MessageType.PONG:
+                    raise TransportError(
+                        f"Expected PONG from '{peer.target.name}', got {reply.msg_type.value}"
+                    )
+                rtts.append((time.perf_counter() - t0) * 1000.0)
+            peer.rtt_ms = min(rtts) if rtts else 0.0
+            logger.info(
+                "Tunnel RTT to '%s': min=%.1fms avg=%.1fms",
+                peer.target.name,
+                peer.rtt_ms,
+                sum(rtts) / len(rtts),
+            )
 
     @property
     def first_peer(self) -> ConnectedPeer:

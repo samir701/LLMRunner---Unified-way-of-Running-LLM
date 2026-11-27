@@ -256,6 +256,7 @@ def run_peer_server(config: PeerConfig) -> None:
                         timeout=15.0,
                         label=f"host({config.host_address}:{config.host_port})",
                         transport=config.host_transport,
+                        socks5_proxy=config.socks5_proxy,
                     )
                     host_conn.send_message(
                         register_msg(

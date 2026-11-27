@@ -25,6 +25,7 @@ class MessageType(str, Enum):
     READY = "READY"
     ACTIVATE = "ACTIVATE"
     LOGITS = "LOGITS"
+    TOKEN = "TOKEN"
     PING = "PING"
     PONG = "PONG"
     STOP = "STOP"
@@ -37,16 +38,21 @@ class Message:
 
     msg_type: MessageType
     header: dict[str, Any] = field(default_factory=dict)
-    payload: bytes = b""
+    payload: bytes | bytearray = b""
+
+    def encode_parts(self) -> tuple[bytes, bytes | bytearray]:
+        """Return serialized UTF-8 JSON header bytes and payload without copying payload."""
+        full_header = {"type": self.msg_type.value, **self.header}
+        header_bytes = json.dumps(full_header, separators=(",", ":")).encode("utf-8")
+        return header_bytes, self.payload
 
     def encode(self) -> bytes:
         """Serialize message to `header_len (4B) + json_header + payload`."""
-        full_header = {"type": self.msg_type.value, **self.header}
-        header_bytes = json.dumps(full_header, separators=(",", ":")).encode("utf-8")
-        return _HEADER_LEN_STRUCT.pack(len(header_bytes)) + header_bytes + self.payload
+        header_bytes, payload = self.encode_parts()
+        return _HEADER_LEN_STRUCT.pack(len(header_bytes)) + header_bytes + payload
 
     @classmethod
-    def decode(cls, frame: bytes) -> "Message":
+    def decode(cls, frame: bytes | bytearray | memoryview) -> "Message":
         """Deserialize a frame (`header_len + json_header + payload`) into a Message."""
         if len(frame) < _HEADER_LEN_STRUCT.size:
             raise ValueError("Frame too short to contain header length.")
@@ -57,12 +63,17 @@ class Message:
             raise ValueError(
                 f"Truncated frame: expected {header_end} header bytes, got {len(frame)}."
             )
-        header_dict = json.loads(frame[header_start:header_end].decode("utf-8"))
+        header_raw = frame[header_start:header_end]
+        if not isinstance(header_raw, (bytes, bytearray)):
+            header_raw = bytes(header_raw)
+        header_dict = json.loads(header_raw.decode("utf-8"))
         msg_type_raw = header_dict.pop("type", None)
         if msg_type_raw is None:
             raise ValueError("Message JSON header missing required 'type' field.")
         msg_type = MessageType(msg_type_raw)
         payload = frame[header_end:]
+        if isinstance(payload, memoryview):
+            payload = bytearray(payload)
         return cls(msg_type=msg_type, header=header_dict, payload=payload)
 
 
@@ -156,16 +167,20 @@ def activate_msg(
     token_pos: int,
     shape: list[int],
     dtype: str,
-    payload: bytes,
+    payload: bytes | bytearray,
+    sample: dict[str, Any] | None = None,
 ) -> Message:
+    header: dict[str, Any] = {
+        "session_id": session_id,
+        "token_pos": token_pos,
+        "shape": shape,
+        "dtype": dtype,
+    }
+    if sample is not None:
+        header["sample"] = sample
     return Message(
         MessageType.ACTIVATE,
-        {
-            "session_id": session_id,
-            "token_pos": token_pos,
-            "shape": shape,
-            "dtype": dtype,
-        },
+        header,
         payload=payload,
     )
 
@@ -175,17 +190,40 @@ def logits_msg(
     token_pos: int,
     shape: list[int],
     dtype: str,
-    payload: bytes,
+    payload: bytes | bytearray,
+    peer_ms: float | None = None,
 ) -> Message:
+    header: dict[str, Any] = {
+        "session_id": session_id,
+        "token_pos": token_pos,
+        "shape": shape,
+        "dtype": dtype,
+    }
+    if peer_ms is not None:
+        header["peer_ms"] = round(peer_ms, 2)
     return Message(
         MessageType.LOGITS,
-        {
-            "session_id": session_id,
-            "token_pos": token_pos,
-            "shape": shape,
-            "dtype": dtype,
-        },
+        header,
         payload=payload,
+    )
+
+
+def token_msg(
+    session_id: str,
+    token_pos: int,
+    token_id: int,
+    peer_ms: float | None = None,
+) -> Message:
+    header: dict[str, Any] = {
+        "session_id": session_id,
+        "token_pos": token_pos,
+        "token_id": int(token_id),
+    }
+    if peer_ms is not None:
+        header["peer_ms"] = round(peer_ms, 2)
+    return Message(
+        MessageType.TOKEN,
+        header,
     )
 
 

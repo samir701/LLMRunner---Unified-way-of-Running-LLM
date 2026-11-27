@@ -22,7 +22,7 @@ def encode_tensor(tensor: torch.Tensor) -> tuple[bytes, list[int], str]:
 
 
 def decode_tensor(
-    data: bytes,
+    data: bytes | bytearray | memoryview,
     shape: list[int] | tuple[int, ...],
     dtype: str = "float16",
     device: str | torch.device = "cpu",
@@ -30,8 +30,13 @@ def decode_tensor(
     """Reconstruct a PyTorch tensor from raw wire bytes and shape metadata."""
     if dtype != "float16":
         raise ValueError(f"Unsupported wire dtype '{dtype}'; V1 expects 'float16'.")
-    np_arr = np.frombuffer(data, dtype=np.float16).copy()
+    if isinstance(data, bytearray):
+        # bytearray is already writable, avoiding an extra CPU memcpy.
+        np_arr = np.frombuffer(data, dtype=np.float16)
+    else:
+        np_arr = np.frombuffer(data, dtype=np.float16).copy()
     tensor = torch.from_numpy(np_arr).reshape(tuple(shape))
-    if str(device) != "cpu":
-        tensor = tensor.to(device=device)
+    target_device = device if isinstance(device, torch.device) else torch.device(device)
+    if target_device.type != "cpu":
+        tensor = tensor.to(device=target_device)
     return tensor

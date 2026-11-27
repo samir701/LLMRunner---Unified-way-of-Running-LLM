@@ -57,3 +57,21 @@ def test_tensor_payload_messages_round_trip() -> None:
     decoded_log = Message.decode(log.encode())
     assert decoded_log.msg_type == MessageType.LOGITS
     assert decoded_log.payload == payload
+
+    from src.common.messages import token_msg
+
+    act_s = activate_msg(
+        "sess-1",
+        token_pos=0,
+        shape=[1, 3, 4],
+        dtype="float16",
+        payload=payload,
+        sample={"t": 0.5, "p": 0.9, "k": 40, "r": 1.1},
+    )
+    decoded_act_s = Message.decode(act_s.encode())
+    assert decoded_act_s.header["sample"] == {"t": 0.5, "p": 0.9, "k": 40, "r": 1.1}
+
+    tok = token_msg("sess-1", token_pos=7, token_id=42)
+    decoded_tok = Message.decode(tok.encode())
+    assert decoded_tok.msg_type == MessageType.TOKEN
+    assert decoded_tok.header["token_id"] == 42

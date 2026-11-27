@@ -197,6 +197,13 @@ def load_model_shard(
     path = Path(model_dir)
     device = resolve_device(device_pref)
     dtype = torch.float16 if device.type == "cuda" else torch.float32
+    if device.type == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        try:
+            torch.set_float32_matmul_precision("high")
+        except Exception:
+            pass
 
     config = read_model_config(path)
     weight_map = _find_safetensors_files(path)
